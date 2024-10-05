@@ -1,0 +1,327 @@
+OVERVIEW
+--------------------------------------------------------------------------------
+  The VIS1802 is a stand alone serial ASCII terminal based on the CDP1802 CPU and the RCA CDP1869/1870/1876 VIS chip set.  The VIS generates a 40x24 character text display or an 240x192 pixel graphics display with up to eight colors.  The display scan rate is 15750Hz horizontal and 60Hz vertical with either NTSC/PAL color encoding (using the CDP1870 chip) or RGB TTL colors (using the CDP1876 chip).
+
+  The VIS text font uses a 6x8 pixel glyph with either 64 upper case only, or 128 upper and lower case characters.  The font is contained in RAM and is loaded from EPROM at startup, and custom font glyphs may be downloaded later.  The 64 character font can display two different text colors simultaneously, but the 128 character font can display only one.  The 128 character font also contains 32 special graphics characters which may be selected with the appropriate escape sequence.
+
+  The VIS1802 uses a CDP1854 UART and a CDP1861 baud rate generator.  It can operate at all standard rates from 110 to 9600bps, and can use either CTS/DTR hardware flow control or XON/XOFF software flow control.  A PS/2 keyboard is used for input, and an AT89C4051 auxiliary processor decodes the PS/2 prototocol to generate ASCII key codes.  The VIS chipset contains a sound generator that can play simple musical tunes.
+
+  The VIS1802 firmware also contains a copy of the RCA BASIC3 interpreter and can operate in local mode as a stand alone BASIC computer.  Up to 28K of RAM is available to BASIC for storing programs and data, and programs can be uploaded to or downloaded from a host computer over the serial port using the XMODEM protocol.  The VIS1802 BASIC has been extended to include functions that allow input and output to be redirected to either the serial port or to the PS/2 keyboard and VIS display.
+
+  BASIC has also been extended with graphics functions to plot points and draw lines.  A BASIC PLAY statement allows playing of simple music using the VIS sound generator, and the BASIC TIME and WAIT functions keep track of the time of day using VRTC interrupts.   And lastly, a BASIC KEY function allows for non-blocking console input from either the serial port or PS/2 keyboard.
+
+HARDWARE NOTES
+--------------------------------------------------------------------------------
+
+  The approximate memory layout of the VIS1802 EPROM is -
+
+	$0000..$3FFF - VIS terminal code
+	$4000..$6FFF - BASIC interpreter
+	$7000..$71FF - 64 character font
+	  - or - 
+	$7000..$73FF - 128 character font
+	$7400..$7FFB - help and menu text
+	$7FFC..$7FFF - checksum
+
+  DIP switch settings
+
+  SW3 SW2 SW1	BAUD
+   0   0   0	 110
+   0   0   1	 150
+   0   1   0	 300
+   0   1   1	 600
+   1   0   0	1200
+   1   0   1	2400
+   1   1   0	4800
+   1   1   1	9600
+
+  SW4 - ON->7E1 or 2, OFF->8N1 or 2
+  NOTE: One stop bit is automatically selected for baud rates 1200 and up.
+	 Two stop bits are selected for baud rates below 1200.
+
+  SW5 - ON->XON/XOFF flow control, OFF->CTS flow control
+
+  SW7 SW6	STARTUP MODE
+   0   0	TERMINAL ONLINE
+   0   1  TERMINAL LOCAL
+   1   0  BASIC ONLINE
+   1   1  BASIC LOCAL
+
+  SW8 - ON->STARTUP SCREEN, OFF-> NO STARTUP SCREEN
+
+  LEDS
+  The VIS1802 board contains two LEDs -
+
+  CPU OK - turns on when the 102 firmware finishes initialization and it stays on forever after that, unless there's some major software crash.
+
+  PS/2 OK - turns on when the PS/2 APU firmware finishies initialization.  It turns off whenever the APU has keyboard input waiting for the 1802, and then back on again when the 1802 firmware reads it.  Because the 1802 firmware is interrupt driven normally you won't see this LED turn off at all, unless something crashes.
+  
+  VIS CHIPSET
+    The RCA VIS chipset consists of two chips; the first is the CDP1869 which handles the memory addressing and also does the sound generation.  The second chip can be EITHER the CDP1870 or the CDP1876.  The CDP1870 generates a composite NTSC or PAL color output.  The CDP1870 can drive a CGA type monitor, however only in monochrome.
+
+   The CDP1876 provides an RGB output and can drive either an analog RGB monitor with composite sync on green, or a proper CGA monitor with separate horizontal and veretical sync.  Either chip is interchangeable in the VIS1802 and you can simply plug in either one, however the outputs you get will depend on the chip used.
+
+  IMPORTANT - the 14.31818Mhz oscillator is still required by the VIS1802, even if the CDP1876 is used, because this also provides the clock for the 89C4051 PS/2 keyboard APU!
+
+  Unlike the VT1802/i8275, the VIS chipset timing is pretty much hardwired by RCA and can't be changed.  The pixel clock should be 5.67MHz and this generates a 40 column by 24 line text display, or a 240x192 pixel graphics display.  This will also give the standard 60Hz vertical and 15,750Hz horizontal video timing.
+   
+  CONNECTORS
+  PS/2 - standard IBM PC, AT or PS/2 style keyboard, depending on the connector you provide.  There are only four signals on this connector - +5, ground, clock and data.
+  
+  SERIAL - RS232 serial port intended to connect to a DB9M (male) connector using a standard IBM PC type serial cable.  Standard RS232 signal levels are used (thanks to the MAX232) and the only pins used are TXD, RXD, CTS, and RTS.  The VIS1802 uses CTS for flow control, however RTS is currently ignored by the software.
+  
+  CGA - this header is intended to connect to a DE9F (female!) connector using a standard PC style ribbon cable.  If the CDP1876 is used then TTL level RED, GREEN and BLUE signals plus separate HSYNC and VSYNC signals are provided.  In addition, pin 7 carries a monochrome TTL video signal (the logical OR of R+G+B).  THIS CONNECTOR DOESN'T PROVIDE ANY USEFUL SIGNALS IF THE CDP1870 CHIP IS USED!
+  
+  RGB (sync on green) - these three phono plugs provide analog (75 ohm impedance, approximately 1V P-P) RGB video when the CDP1876 chip is used.  Composite sync is used, on the green output.  THESE CONNECTORS DON'T CARRY ANY USEFUL SIGNALS IF THE CDP1870 IS USED!
+  
+  CVBS (NTSC color) - this phono plug carries the composite color video, either NTSC or PAL encoded depending on the jumper settings.  This is also an analog signal, 75 ohm impedance and approximately 1V P-P.  THIS CONNECTOR WORKS ONLY IF THE CDP1870 CHIP IS USED!
+  
+  SPEAKER - connects to an 8 ohm speaker to carry the sound output from the CDP1869 as amplified by the LM386.  Somewhere around 100mW of audio power is available, and the volume may be adjusted using VR3.
+  
+  AUDIO (line level) - 1/8" STEREO phone plug that carries line level audio from the CDP1869.  The volume level here is also controlled by VR3, and inserting a plug here will disconnect the internal amplifier and speaker output.  Note that the CDP1869 only outputs a single audio channel, however this is a STEREO jack.  Both channels are tied together, but beware - if you insert a mono plug it will short the signal to ground!
+
+TERMINAL EMULATION
+--------------------------------------------------------------------------------
+
+  CONTROL CHARACTERS RECOGNIZED
+  0x05 ^E ENQ - send answerback string
+  0x07 ^G BEL - sound bell tone with the CDP1869
+  0x08 ^H BS  - cursor left (backspace)
+  0x09 ^I HT  - cursor right to next tab stop
+  0x0A ^J LF  - cursor down and scroll up
+  0x0B ^K VT  - same as LF
+  0x0C ^L FF  - home cursor and erase screen
+  0x0D ^M CR  - move cursor to left margin
+  0x0E ^N SO  - select normal character set
+  0x0F ^O SI  - select graphics character set
+  0x1B ^[ ESC - introducer for escape sequences
+
+  STANDARD (VT52) ESCAPE SEQUENCES
+  <ESC>A 	-- cursor up
+  <ESC>B 	-- cursor down
+  <ESC>C 	-- cursor right
+  <ESC>D 	-- cursor left
+  <ESC>E 	-- erase screen
+  <ESC>F 	-- select alternate character Set
+  <ESC>G 	-- select normal character Set
+  <ESC>H 	-- cursor home
+  <ESC>I 	-- reverse line feed
+  <ESC>J 	-- erase to end of screen
+  <ESC>K 	-- erase to end of line
+  <ESC>Y x y	-- direct cursor addressing
+  <ESC>Z 	-- identify as VT52
+
+  EXTENDED ESCAPE SEQUENCES
+  <ESC>b c	-- select foreground colors
+  <ESC>c c	-- select background color
+  <ESC>d 	-- display cursor
+  <ESC>e	-- erase graphics screen
+  <ESC>g	-- display graphics screen
+  <ESC>h 	-- hide cursor
+  <ESC>l x0 y0 x1 y1 -- draw line from (x0,y0) to (x1,y1)
+  <ESC>r 	-- enable reverse video
+  <ESC>n 	-- disable reverse video
+  <ESC>p x y	     -- draw point at (x,y)
+  <ESC>t	-- display text screen
+  <ESC>v 	-- enable auto newline
+  <ESC>w 	-- disable auto newline
+
+  FOREGROUND COLOR COMBINATIONS    
+   <ESC>b arg	primary	alternate
+		font1	font2
+   ----------	-------	---------
+   0x20	sp	BLACK	BLACK
+   0x21	!	BLACK	BLUE
+   0x22	"	BLACK	RED
+   0x23	#	BLACK	MAGENTA
+   0x24	$	BLACK	GREEN
+   0x25	%	BLACK	CYAN
+   0x26	&	BLACK	YELLOW
+   0x27	'	BLACK	WHITE
+   0x28	(	BLUE	BLACK
+   0x29	)	BLUE	BLUE
+   0x2A	*	BLUE	RED
+   0x2B	+	BLUE	MAGENTA
+   0x2C	,	BLUE	GREEN
+   0x2D	-	BLUE	CYAN
+   0x2E	.	BLUE	YELLOW
+   0x2F	/	BLUE	WHITE
+   0x30	0	RED	BLACK
+   0x31	1	RED	BLUE
+   0x32	2	RED	RED
+   0x33	3	RED	MAGENTA
+   0x34	4	RED	GREEN
+   0x36	6	RED	YELLOW
+   0x37	7	RED	WHITE
+   0x38	8	MAGENTA	BLACK
+   0x39	9	MAGENTA	BLUE
+   0x3A	:	MAGENTA	RED
+   0x3B	;	MAGENTA	MAGENTA
+   0x3D	=	MAGENTA	CYAN
+   0x3E	>	MAGENTA	YELLOW
+   0x3F	?	MAGENTA	WHITE
+   0x40	@	GREEN	BLACK
+   0x41	A	GREEN	BLUE
+   0x42	B	GREEN	RED
+   0x44	D	GREEN	GREEN
+   0x45	E	GREEN	CYAN
+   0x46	F	GREEN	YELLOW
+   0x47	G	GREEN	WHITE
+   0x48	H	CYAN	BLACK
+   0x49	I	CYAN	BLUE
+   0x4B	K	CYAN	MAGENTA
+   0x4C	L	CYAN	GREEN
+   0x4D	M	CYAN	CYAN
+   0x4E	N	CYAN	YELLOW
+   0x4F	O	CYAN	WHITE
+   0x50	P	YELLOW	BLACK
+   0x52	R	YELLOW	RED
+   0x53	S	YELLOW	MAGENTA
+   0x54	T	YELLOW	GREEN
+   0x55	U	YELLOW	CYAN
+   0x56	V	YELLOW	YELLOW
+   0x57	W	YELLOW	WHITE
+   0x59	Y	WHITE	BLUE
+   0x5A	Z	WHITE	RED
+   0x5B	[	WHITE	MAGENTA
+   0x5C	\	WHITE	GREEN
+   0x5D	]	WHITE	CYAN
+   0x5E	^	WHITE	YELLOW
+   0x5F	_	WHITE	WHITE
+
+BASIC MODIFICATIONS
+--------------------------------------------------------------------------------
+
+  * ENINT, DISINT and DMAPT have been removed.
+
+  * STQ and QST have been removed.
+
+  * INP, OUT and EF have been removed.
+
+  * RFLN, WFLN and CLOSE have been removed.
+
+  * WAIT works, but the argument is interpreted as 60HZ ticks.
+
+  * BYE exits BASIC for a rudimentary monitor that's built in.
+
+  * DIN/DOUT were changed to SINP/SOUT (for "serial").  TIN/TOUT direct BASIC
+    I/O to the PS/2 keyboard and VIS display.  SINP/SOUT direct BASIC I/O to
+    the serial port.   (Note that we can't use "SIN" as a function name, since
+    that's already used for the trig operation!)
+
+  * DIP switch SW6 allows you to select the initial I/O devices for BASIC.
+    SW6=1 -> BASIC uses the serial port for I/O; SW6=0 -> BASIC uses the PS/2
+    keyboard and VIS display.  SW6 only affects the INITIAL setting for BASIC
+    I/O; once BASIC is started you can switch I/O with the SIN/SOUT and
+    TIN/TOUT statements.
+
+  * PLOAD, PSAVE, DLOAD and DSAVE use the XMODEM protocol over the serial port.
+    These commands ALWAYS use the serial port regardless of the current SIN/SOUT
+    and TIN/TOUT selection.
+
+  * New keywords added -
+
+	PLAY string	   -> play music
+	GRAPHICS 0	   -> revert to text mode display
+	GRAPHICS 1	   -> display graphics screen
+	GRAPHICS 3	   -> display graphics and clear screen
+	PLOT (x,y)	   -> plot a point in graphics mode
+	LINE (x0,y0,x1,y1) -> draw a line in graphics mode
+	KEY		   -> poll console for input
+	TIME		   -> return system uptime in ticks
+
+  * New error codes
+
+	91 -> wrong number of arguments for PLOT()
+	92 -> wrong number of arguments for LINE()
+	93 -> invalid coordinate for PLOT() or LINE()
+	94 -> invalid character in PLAY string
+
+MUSIC Notation for the PLAY string
+--------------------------------------------------------------------------------
+
+
+   The music player takes an ordinary ASCII string and interprets it as a musical notation of sorts.  The letters A..G (or a..g, since case is ignored) refer to the notes A thru G.  Each letter may be followed by a "+" or "#" to indicate a sharp, or a "-" to indicate a flat. "DABF#GDGA" would get you the famous 8 note cello part from Pachelbel's Canon.
+
+   Other characters have special meanings as well.  The digits 1, 2, 4 or 8 specify the note duration - whole note, half note, quarter note or eighth note (notice that larger numbers are shorter intervals!).  Sixteenth notes are unfortunately not possible - sorry!  The note duration must preceed the note ("4D" for a quarter note D, NOT "D4"!) and remain in effect until changed by another digit.  So the string "4DABF" would be ALL quarter notes.
+
+   The "," indicates a rest of the same duration as the current note (e.g. "1," is a whole rest.  A ">" shifts all notes up one octave and "<" shifts all notes down one octave.  The player has an overal range of four octaves, from one octave below middle C to two octaves above, and attempts to shift above or below this range will be ignored.  There is no way to absolutely set the current octave, however something like "<<<<>" would select the octave of middle C.
+
+   Spaces in the string are ignored, and playing terminates when any illegal character, including EOS ('\0'), is encountered.  
+
+   Summary -
+	A, B, C, D, E, F, G - a note to play
+	# or +, -	    - sharp or flat (place AFTER note!)
+	1, 2, 4, 8	    - note length (whole, half, quarter, eighth)
+	>, <		    - shift up or down one octave
+	,		    - rest (silence)
+	<space>		    - ignored
+
+   Note that by tradition a quarter note lasts one beat, so a whole note is 4 beats, a half note is 2 beats, and an eighth note is 1/2 beat.   Yeah, it would have been better to start at the eighth note, but I don't make the rules!  If the tempo is, say 60 beats per minute, then a quarter note is 1 second and a whole note 4 seconds.  Given that we count note times in 60Hz VRTC interrupts, at 60 BPM a whole note would be 240 ticks which is about the longest count we can fit into one byte.  That makes the slowest possible tempo about 60 BPM, which turns out to be pretty reasonable for most music.
+
+   Various examples -
+	GG>DDEED,CC<BBAAG	- Twinkle, Twinkle Little Star
+	DEC<CG			- Close Encounters
+	Beethoven's Ninth, 4th movement (aka Ode to Joy) ...
+	EEFGGFEDCCDEE8D2D4,EEFGGFEDCCDED8C2C4,DDECD8EF4ECD8EF4EDCD<G>,EEFGGFEDCCDED8C2C
+
+VIS1802 BUILT IN DEBUG MONITOR
+--------------------------------------------------------------------------------
+
+E[xamine] addr			-- examine one byte
+E[xamine] addr1 addr2		-- dump a range of bytes
+D[eposit] addr data [data ...]	-- deposit data in memory
+REG[isters]			-- show registers after trap
+IN[put] port			-- read data from a group 1 port
+OUT[put] port data		-- write data to a group 1 port
+VIS port data			-- issue VIS command
+VM[ode] data			-- load the video mode register
+GRA[phics]			-- switch to graphics mode display
+TEX[t]				-- switch to text mode display
+GCLR				-- clear graphics memory
+TES[t]				-- display text test pattern
+GTES[t]				-- display graphcs test pattern
+SPL[ash]			-- display splash screen
+PL[ay]				-- play music string
+ODE				-- play demo music
+TIN				-- switch console input to PS/2
+SIN				-- switch console input to serial
+TOUT				-- switch console output to VIS
+SOUT				-- switch console output to serial
+TERM				-- enter terminal emulation
+KEY[test]			-- echo PS/2 keyboard input
+XS[ave]				-- save memory with XMODEM
+XL[oad]				-- download memory with XMODEM
+BAS[ic]				-- start BASIC3 interpreter
+HEL[p]				-- print this text
+:llaaaattdddd..cc		-- load an INTEL hex record
+; any text			-- comment command procedures
+^C				-- cancel current command line
+<BREAK>				-- interrupt execution of long commands
+
+STUFF THAT NEEDS TO BE DONE!
+--------------------------------------------------------------------------------
+
+  * Add graphics functions via serial port - <ESC>e, g, l, and p
+  * Add auto newline <ESC>v and w.
+  * Distinguish between auto new line and auto line wrap?
+    Auto newline means that whenever the terminal receives a <CR> it
+      automatically adds an <LF> as well.  Unfortunately, if we receive <CRLF>
+      then the text is double spaced!
+    Auto line wrap means that when receiving text and the cursor hits the
+      right edge of the screen, the cursor automatically wraps around to the
+      left edge of the next line.   If auto line wrap is disabled then the
+      cursor "sticks" at the right edge and subsequent characters just overwrite
+      until a <CRLF> is received.
+    Currently the code DOES auto line wrap and DOES NOT do auto new line!
+  * Add keyboard shortcuts (function keys?) to flip between text and graphics
+  * Put BOTH 64 and 128 character fonts in ROM and add escape sequences to
+    switch between them
+  * Use the second PMEM page as the BASIC text display.  Now we can have BOTH
+    the remote terminal AND BASIC in local mode active at the same time.  Add
+    Keyboard shortcut to switch between BASIC and terminal modes.
+  * The set color sequences need to hide/show the cursor.
+  * Expect an 1805 CPU and try to speed up the code by replacing the macros
+    with built-in 1805 instructions, especially RLDI, SCAL, SRET, etc.
+  * See if we can't improve performance by queueing up simple screen updates
+    (e.g. ones which only increment the cursor) during the VBI.

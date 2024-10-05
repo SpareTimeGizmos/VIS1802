@@ -1,0 +1,66 @@
+#++
+# vis1802.hlp - Help text for Spare Time Gizmos VIS1802 monitor
+#
+# Copyright (C) 2024 by Spare Time Gizmos.  All rights reserved.
+#
+# This firmware is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the Free
+# Software Foundation; either version 2 of the License, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+# more details.
+#
+# You should have received a copy of the GNU General Public License along with
+# this program; if not, write to the Free Software Foundation, Inc., 59 Temple
+# Place, Suite 330, Boston, MA  02111-1307  USA
+#
+#DESCRIPTION:
+#   This text file is the source for monitor firmware that's built in to the
+# VIS1802 video display.  This text is what you see when you type the monitor
+# "HELP" command.  This file is converted to a .HEX image by the romtext
+# program and then merged into the EPROM image by rommerge.
+#
+#IMPORTANT!
+#   Lines which begin with a "#" are comments and are completely discarded by
+# the romtext program, up to and including the newline at the end.  EVERYTHING
+# ELSE, including spaces, tabs, newlines, EVERYTHING, gets put into the EPROM!
+#
+# REVISION HISTORY:
+# dd-mmm-yy	who     description
+# 29-APR-24	RLA	New file.
+#--
+#000000001111111111222222222233333333334
+#234567890123456789012345678901234567890
+E[xamine] addr			-- examine one byte
+E[xamine] addr1 addr2		-- dump a range of bytes
+D[eposit] addr data [data ...]	-- deposit data in memory
+REG[isters]			-- show registers after trap
+IN[put] port		-- read data from a group 1 port
+OUT[put] port data	-- write data to a group 1 port
+VIS port data	-- issue VIS command
+VM[ode] data	-- load the video mode register
+GRA[phics]	-- switch to graphics mode display
+TEX[t]	-- switch to text mode display
+GCLR	-- clear graphics memory
+TES[t]	-- display text test pattern
+GTES[t]	-- display graphcs test pattern
+SPL[ash]-- display splash screen
+PL[ay]	-- play music string
+ODE	-- play demo music
+TIN	-- switch console input to PS/2
+SIN	-- switch console input to serial
+TOUT	-- switch console output to VIS
+SOUT	-- switch console output to serial
+TERM	-- enter terminal emulation
+KEY[test]		-- echo PS/2 keyboard input
+XS[ave]	-- save memory with XMODEM
+XL[oad]	-- download memory with XMODEM
+BAS[ic]	-- start BASIC3 interpreter
+HEL[p]	-- print this text
+:llaaaattdddd..cc	-- load an INTEL hex record
+; any text	-- comment command procedures
+^C		-- cancel current command line
+<BREAK>		-- interrupt execution of long commands

@@ -1,0 +1,129 @@
+/*++									*/
+/* vis1802.pld - Spare Time Gizmos VIS1802 I/O decoding GAL		*/
+/*									*/
+/*   Copyright (C) 2024 by Robert Armstrong, Milpitas, California.	*/
+/*									*/
+/*  This program is free software; you can redistribute it and/or	*/
+/* modify it under the terms of the GNU General Public License as	*/
+/* published by the Free Software Foundation; either version 2 of the	*/
+/* License, or (at your option) any later version.			*/
+/*									*/
+/*  This program is distributed in the hope that it will be useful, but	*/
+/* WITHOUT ANY WARRANTY; without even the implied warranty of		*/
+/* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU	*/
+/* General Public License for more details.				*/
+/*									*/
+/*   You should have received a copy of the GNU General Public License	*/
+/* along with this program; if not, write to the Free Software		*/
+/* Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111 USA.	*/
+/*									*/
+/* DESCRIPTION								*/
+/*   This GAL decodes the necessary control signals for most of the	*/
+/* peripheral chips in the VIS1802.  It's pretty simple, although one	*/
+/* complication is that the CDP1869/70/76 chip set uses up the entire	*/
+/* 1802 7 port I/O address space.  Because of that we implement a super	*/
+/* simple RCA style I/O group scheme - group 0 selects the VIS chip	*/
+/* set, and group 1 selects everything else.  The I/O group select is 	*/
+/* implemented as one bit in the flags register, and this register is	*/
+/* always selected by writes to port 1 regardless of the current group.	*/
+/*									*/
+/*   Also note that the CDP1854	UART doesn't need ANY help with I/O	*/
+/* decoding.  It has enough enable inputs the handle all the decoding	*/
+/* on its own, including the group select.				*/
+/*									*/
+/* I/O MAP								*/
+/*	GROUP	PORT	INPUT		OUTPUT				*/
+/*	-----	----	---------------	---------------			*/
+/*	 XXX	  1			I/O group and flags		*/
+/*									*/
+/*	  0	  2			clear VIS interrupt request	*/
+/*	  0	  3			CDP1870/76 command		*/
+/*	  0	  4			CDP1869 tone control		*/
+/*	  0	  5			CDP1869 noise control		*/
+/*	  0	  6			CDP1869 PMA register		*/
+/*	  0	  7			CDP1869 HMA register		*/
+/*									*/
+/*	  1	  2	CDP1854 RXBUF	CDP1854 TXBUF			*/
+/*	  1	  3	CDP1854 STATUS	CDP1854 CONTROL			*/
+/*	  1	  4	DIP switches					*/
+/*	  1	  5	keyboard data					*/
+/*	  1	  6			CDP1863 baud rate divisor	*/
+/*	  1	  7							*/
+/*									*/
+/*									*/
+/*   Lastly, note that the CDP1869/70/76 chipset doesn't have an enable	*/
+/* or select input. The only way we can make their I/O functions depend	*/
+/* on the group select is to AND the VIS N2..0 inputs with the group 	*/
+/* selection.  That way the 1869/70/76 chips always see N=0 when their	*/
+/* I/O group is NOT selected.						*/
+/*									*/
+/* REVISION HISTORY							*/
+/* 26-APR-24	RLA	New file.					*/
+/*  2-MAY-24	RLA	Add VIS interrupt request F-F			*/
+/*  5-SEP-24	RLA	Changes for the rev B PCB			*/
+/*--									*/
+NAME            VIS1802;
+PARTNO          VIS1802;
+REVISION        C;
+DATE            09/05/24;
+DESIGNER        Robert Armstrong;
+COMPANY         Spare Time Gizmos;
+ASSEMBLY        VIS1802;
+LOCATION        U20;
+DEVICE          G22V10;
+
+/* INPUTS...								*/
+/* Pin 1 = N/C */
+Pin  2 =  TPA;		/* CDP1802 timing pulse A			*/
+Pin  3 =  TPB;		/*    "       "     "   B			*/
+Pin  4 = !MRD;		/* CDP1802 memory read strobe			*/
+Pin  5 = !MWR;		/*    "     "  "  write  "			*/
+Pin  6 =  N0;		/* CDP1802 I/O address line #2 (MSB)		*/
+Pin  7 =  N1;		/*    "     "     "     "   #1			*/
+Pin  8 =  N2;		/*    "     "     "     "   #0 (LSB)		*/
+Pin  9 =  IO_GROUP;	/* I/O group selection (group 0 or 1)		*/
+/* Pin 10 = N/C */
+/* Pin 11 = N/C */
+/* Pin 13 = N/C */
+FIELD N = [N2..N0];
+
+/* OUTPUTS...								*/
+Pin 23 =  WR_FLAGS;	/* write the I/O group and graphics mode bits	*/
+Pin 22 =  WR_BAUD;	/* write the CDP1863 baud rate generator	*/
+Pin 21 =  RD_KEY_DATA;	/* enable the CDP1852 keyboard buffer		*/
+Pin 20 =  VIS_N0;	/* gated N0 output to VIS chipset		*/
+Pin 19 =  VIS_N1;	/*   "   N1    "    "   "   "   "		*/
+Pin 18 =  VIS_N2;	/*   "   N2    "    "   "   "   "		*/
+Pin 17 =  IO_STRETCH;	/* used to extend the 1802 MRD access time	*/
+/* Pin 16 = N/C */
+Pin 15 = !CLR_VIS_IRQ;	/* clear the VIS interrupt request		*/
+Pin 14 = !RD_SWITCHES;	/* read DIP switch register			*/
+FIELD VIS_N = [VIS_N2..VIS_N0];
+
+
+/*   IO_STRETCH is a simple SR flip flop that's set by TPA and cleared	*/
+/* by TPB.  This lets us stretch the usual CDP1802 I/O read time to	*/
+/* almost 8 clock cycles, which is nearly an eternity. Once we have IO_	*/
+/* STRETCH signal we can generate the IORD and IOWR signals.  Remember	*/
+/* that on the 1802 an I/O read is a memory write, and an I/O write is	*/
+/* a memory read.  Note that these signals are only valid when N != 0,	*/
+/* and you must include some kind of N decoding in any logic.   	*/
+IO_STRETCH = (!IO_STRETCH & TPA)  #  (IO_STRETCH & !TPB);
+IORD = ((IO_STRETCH & !TPA) # TPB) & !MRD;
+IOWR = TPB & MRD;
+
+
+/* The VIS N2..0 inputs are gated with the I/O group select ... */
+VIS_N = N & !IO_GROUP;
+
+/*  Now decode the read or write strobes for all the other I/O devices. */
+/* Note that ALL of these must be conditioned with I/O GROUP, EXCEPT	*/
+/* for the flags register.  This is the one that selects the I/O group,	*/
+/* and naturally it works the same in either I/O group.  Also note that	*/
+/* N=2 and N=3 in group 1 are externally decoded by the CDP1854 UART.	*/
+WR_FLAGS    = IOWR             & N:1;
+CLR_VIS_IRQ = IOWR & !IO_GROUP & N:2;
+RD_SWITCHES = IORD &  IO_GROUP & N:4;
+RD_KEY_DATA = IORD &  IO_GROUP & N:5;
+WR_BAUD     = IOWR &  IO_GROUP & N:6;
+
