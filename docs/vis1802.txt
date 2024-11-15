@@ -23,6 +23,11 @@ HARDWARE NOTES
 	$7400..$7FFB - help and menu text
 	$7FFC..$7FFF - checksum
 
+  JUMPERS
+
+  The SYNC POLARITY jumpers control the polarity of the HSYNC and VSYNC signals present at the CGA connector.  An installed jumper gives a positive going sync pulse, and a jumper removed gives a negative going pulse.  A normal IBM CGA monitor (or an EGA monitor in CGA mode) wants positive going pulses for both horizontal and vertical sync, and requires both jumpers be installed.  Note that these jumpers have no effect on the CVBS composite nor RGB outputs.
+
+  The two PAL/NTSC jumpers select (what else?) PAL or NTSC timing and composite video output.  Note that the composite video is affected only if the 1870 is used, however the video timing will change at the 
   DIP switch settings
 
   SW3 SW2 SW1	BAUD

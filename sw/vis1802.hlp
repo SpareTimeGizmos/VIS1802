@@ -31,36 +31,45 @@
 # REVISION HISTORY:
 # dd-mmm-yy	who     description
 # 29-APR-24	RLA	New file.
+# 14-NOV-24	RLA	Clean up and format for 40 columns.
 #--
 #000000001111111111222222222233333333334
 #234567890123456789012345678901234567890
-E[xamine] addr			-- examine one byte
-E[xamine] addr1 addr2		-- dump a range of bytes
-D[eposit] addr data [data ...]	-- deposit data in memory
-REG[isters]			-- show registers after trap
-IN[put] port		-- read data from a group 1 port
-OUT[put] port data	-- write data to a group 1 port
-VIS port data	-- issue VIS command
-VM[ode] data	-- load the video mode register
-GRA[phics]	-- switch to graphics mode display
-TEX[t]	-- switch to text mode display
-GCLR	-- clear graphics memory
-TES[t]	-- display text test pattern
-GTES[t]	-- display graphcs test pattern
-SPL[ash]-- display splash screen
-PL[ay]	-- play music string
-ODE	-- play demo music
-TIN	-- switch console input to PS/2
-SIN	-- switch console input to serial
-TOUT	-- switch console output to VIS
-SOUT	-- switch console output to serial
-TERM	-- enter terminal emulation
-KEY[test]		-- echo PS/2 keyboard input
-XS[ave]	-- save memory with XMODEM
-XL[oad]	-- download memory with XMODEM
-BAS[ic]	-- start BASIC3 interpreter
-HEL[p]	-- print this text
-:llaaaattdddd..cc	-- load an INTEL hex record
-; any text	-- comment command procedures
-^C		-- cancel current command line
-<BREAK>		-- interrupt execution of long commands
+rMEMORY AND REGISTER COMMANDSn
+E addr	  	   -- examine location
+E addr1 addr2	   -- examine range
+D addr data ...	   -- deposit in RAM
+XSAVE		   -- save w/XMODEM
+XLOAD		   -- download w/XMODEM
+:llaaaattdddd..cc  -- load INTEL data
+REGISTERS	   -- regs after trap
+
+rI/O COMMANDSn
+INPUT port         -- read from port
+OUTPUT port data   -- out data to port
+VIS port data	   -- issue VIS command
+
+rTEST COMMANDSn
+GRAPHICS	   -- graphics mode
+TEXT		   -- text mode
+GCLR		   -- clear graphics
+TEST		   -- text test pattern
+GTEST		   -- graphcs test
+SPLASH		   -- splash screen
+PLAY string	   -- play music
+ODE		   -- play music demo
+KEYTEST		   -- echo PS/2 keyboard
+
+rCONSOLE REDIRECTIONn
+TIN		   -- PS/2 input
+SIN		   -- serial input
+TOUT		   -- VIS output
+SOUT		   -- serial output
+
+rOTHER COMMANDSn
+TERM		   -- terminal emulator
+BASIC		   -- start BASIC3
+HELP		   -- print this text
+; any text	   -- comment
+^C		   -- cancel command
+<BREAK>		   -- interrupt

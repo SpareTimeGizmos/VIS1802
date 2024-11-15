@@ -77,7 +77,7 @@
 ; time of day using VRTC interrupts.   And lastly, a BASIC KEY function allows
 ; for non-blocking console input from either the serial port or PS/2 keyboard.
 ;--
-	.SBTTL	"Revision History"
+	.SBTTL	Revision History
 
 ;++
 ; 001	-- Start by stealing from the SBC1802 project!
@@ -110,13 +110,13 @@
 ;
 ; 015	-- Fix up LDFONT to support colors.
 ;
-; 016	-- Add COLORS table and <ESC>O to set foreground colors.
+; 016	-- Add COLORS table and <ESC>b to set foreground colors.
 ;
-; 017	-- Add <ESC>O to set the foreground colors.
+; 017	-- Add <ESC>b to set the foreground colors.
 ;
 ; 018	-- ERASE screws up the colors (because it resets the COLB0/1 bits!)
 ;
-; 019	-- Add <ESC>P to set background color.
+; 019	-- Add <ESC>c to set background color.
 ;
 ; 020	-- BELL needs to call SELIO0!
 ;
@@ -223,11 +223,42 @@
 ;
 ; 062	-- Implement <ESC>g (graphics screen), <ESC>t (text screen), and
 ;	    <ESC>e (erase graphics screen).
+;
+; 063	-- Make VTPUTC trim all characters, EXCEPT the subsequent bytes of
+; 	    escape sequences, to 7 bits.
+;
+; 064	-- Firmware crashes when we receive a null!  There's a missing
+;	    "SEX SP" in VTPUTC.
+;
+; 065	-- Clear graphics memory on startup too
+;
+; 066	-- Always set the HMA register to zero when entering grpahics mode,
+;	   and reset HMA to TOPLIN when switching back to text mode.
+;
+; 067	-- Switch back to text mode when any character is output via VTPUTC,
+;	   EXCEPT for escape sequences (so that we can have escape sequences
+;	   that draw graphics!).
+;
+; 068	-- Clear graphics memory on startup.
+;
+; 069	-- Re-order the ISR code to check for video interrupts last.
+;
+; 070	-- Since any VTPUTC switches back to text mode, make the GRAPHICS and
+;	   GTEST commands wait for input before returning (otherwise the ">>>"
+;	   prompt immediately switches up back to text!).
 ;--
 VERMAJ	.EQU	1	; major version number
-VEREDT	.EQU	61	; and the edit level
+VEREDT	.EQU	70	; and the edit level
 
-	.SBTTL	"VIS1802 Hardware Definitions"
+; TODO LIST!
+;  * support for setting colors in graphics mode
+;  * draw lines or plot points via escape sequences
+;  * play music via escape sequences
+;  * have both 64 and 128 character fonts in ROM; escape sequence to switch
+;  * downloadable fonts, sprites, etc
+;  * really slow (the effective baud rate is about 300!)
+
+	.SBTTL	Hardware Definitions
 
 ; Memory layout ...
 ROMBASE	 .EQU $0000	   	; EPROM starts at $0000
@@ -392,7 +423,7 @@ PAGESIZE  .EQU  MAXCOL*MAXROW	; number of characters in the page RAM
 PAGEEND	  .EQU	PAGEMEM+PAGESIZE; end of screen RAM
 HERTZ	  .EQU	60		; VISISR interrupt frequency
 SCANLINES .EQU	 8		; scan lines per font glyph
-FONTSIZE  .EQU  128		; number of characters in the font
+FONTSIZE  .EQU  64		; number of characters in the font
 CMDMAX	  .EQU	64		; maximum command line length
 BELLTIME  .EQU  HERTZ/2		; delay (in VISISR ticks) for ^G bell
 BLINKTIME .EQU	250		; delay in milliseconds when blinking the LED
@@ -472,7 +503,7 @@ P3	.EQU	$C	; third  " "	"		"
 P4	.EQU	$B	; and fourth...
 AUX	.EQU	$F	; used by SCRT to preserve D
 
-	.SBTTL	"General Macros"
+	.SBTTL	General Macros
 
 ; Advance the current origin to the next page...
 #define PAGE		.ORG ($ + $FF) & $FF00
@@ -636,6 +667,7 @@ CURCLR:	.BLOCK	1	; current COLB1/0 and background color
 SERBRK:	.BLOCK	1	; serial port break flag
 GMODEF:	.BLOCK	1	; 0xFF if in graphics mode, 0x00 for text mode
 UPTIME:	.BLOCK	4	; total time (in VRTC ticks) since power on
+SLUFMT:	.BLOCK	1	; serial port format (8N1 or 7E1)
 
 ; Flags from the keyboard input routine ...
 ; DON'T CHANGE THE ORDER OR GROUPING OF THESE!!
@@ -899,13 +931,16 @@ RAMIN1:	LDI 0\ STXD\ GHI T1	; zero another byte
 
 ; Initialize the hardware ...
 	CALL(SERINI)		; initialize the CDP1854 and CDP1863
-	CALL(VISINI)		; initialize the VIS chipset
+	CALL(VISINI)		; initialize the VIS chipset 
+	CALL(ERASE)		; clear text memory to blanks
 	RLDI(INTPC,ISR)		; set up the interrupt PC
 	ION			; and enable interrupts
-	LED_ON
+	CALL(GERASE)		; and clear graphics memory also
+	CALL(TMODE)		; switch back to text mode
+	LED_ON			; turn the "CPU OK" LED on
 	CALL(BELL)		; and sound the bell
 
-				; and fall into the software startup next
+				; fall into the software startup next
 
 	.SBTTL	Software Initialization
 
@@ -1510,7 +1545,19 @@ GHEX20:	RETURN			; and we're all done
 ; are no arguments ...
 ;--
 GRAPH:	CALL(CHKEOL)		; there are no arguments
-	LBR	GMODE		; select graphics mode and we're done
+	CALL(GMODE)		; select graphics mode 
+
+;   Mega kludge here - if output is to the screen and we just return, then
+; we'll immediately print another ">>>" prompt and that will instantly switch
+; us back to text mode!  Instead, just spin here until the user types something
+; (anything!) and then continue processing commands.
+GWAIT:	RLDI(T1,CONPUT+2)	; get the current console output routine
+	LDN T1\ XRI LOW(VTPUTC)	; is it to the screen ?
+	LBNZ	GRAPH2		; no - just return now
+GRAPH1:	RLDI(T1,KEYGETP)\ LDA T1; yes - test the keyboard buffer
+	SEX T1\ XOR		; GETP == PUTP ??
+	LBZ	GRAPH1		; yes - buffer empty, wait here
+GRAPH2:	RETURN			; no - continue with the next command
 
 
 ;++
@@ -1582,7 +1629,7 @@ PHELP:	CALL(CHKEOL)		; HELP has no arguments
 	RLDI(P1,HLPTXT)		; nope - just print the whole text
 	LBR	TSTR		; ... print it and return
 
-	.SBTTL	TERM Emulator
+	.SBTTL	Terminal Emulator
 
 ;++
 ;   This is your basic terminal emulator.  It simply copies characters from
@@ -1601,10 +1648,10 @@ TERM:	RLDI(T1,KEYBRK)\ SEX T1	; clear both the KEYMNU and KEYBRK flags
 	RLDI(T1,SERBRK)		; and clear the serial break flag too
 	LDI 0\ STR T1		; ...
 
-TERM1:	RLDI(T1,KEYMNU)\ LDN T1	; was the menu key pressed ?
-	LBNZ	MAIN		; yes - start the command scanner
-	RLDI(T1,SERBRK)\ LDN T1	; was a break received on the serial port?
-	LBNZ	MAIN		; yes ...
+TERM1:	CALL(ISKMNU)		; was the menu key pressed ?
+	LBDF	TERM4		; yes - start the command scanner
+	CALL(ISSBRK)		; was a break received on the serial port?
+;;	LBDF	TERM1		; yes - ignore it
 
 ; Check the serial port for input first ...
 	CALL(SERGET)		; anything in the buffer
@@ -1612,17 +1659,31 @@ TERM1:	RLDI(T1,KEYMNU)\ LDN T1	; was the menu key pressed ?
 	CALL(VTPUTC)		; yes - send this character to the screen
 
 ; Check the PS/2 keyboard for input ...
-TERM2:	CALL(GETKEY)		; anything waiting from the keyboard?
+TERM2:	CALL(ISKBRK)		; was the BREAK key pressed ?
+	LBDF	TERM3		; yes - send a break on the serial port
+	CALL(GETKEY)		; anything waiting from the keyboard?
 	LBDF	TERM1		; no - back to checking the serial port
 	CALL(SERPUT)		; yes - send it to the serial port
 	LBR	TERM1		; and keep going
 
+; Here when the PS/2 keyboard BREAK key is pressed ...
+TERM3:	CALL(TXSBRK)		; send a break on the serial port
+	LBR	TERM1		; and then continue
+
+; Here when the PS/2 keyboard MENU key is pressed ...
+TERM4:	OUTSTR(TEMSG)		; print a message
+	LBR	MAIN		; and start up the command scanner
+
 ; Messages ...
 TTMSG:	.TEXT	"[TERMINAL MODE]\r\n\000"
+TEMSG:	.TEXT	"\r\n\n[COMMAND MODE]\r\n\000"
 
 	.SBTTL	Graphics and Terminal Test Commands
 
 ;++
+;   The TEST command displays a "test pattern" (if you want to call it that)
+; screen full of text ...
+;
 ;	>>>TEST
 ;--
 TPATTN:	CALL(CHKEOL)
@@ -1641,25 +1702,12 @@ TPATT2:	DBNZ(T2,TPATT1)
 	RETURN
 
 ;++
+;   The GTEST command displays a graphics test pattern with lines drawn in
+; all four quadrants with slopes both .GT. 1 and .LE. 1...
+;
 ;	>>>GTEST
 ;--
 GTEST:	CALL(CHKEOL)
-;;	RCLR(P1)
-;;GTEST1:	CALL(PLOT)
-;;	GHI P1\ ADI 1\ PHI P1
-;;	GLO P1\ ADI 1\ PLO P1
-;;	SMI 192\ LBL GTEST1
-;;	RLDI(P1,$00BF)
-;;GTEST2:	CALL(PLOT)
-;;	GLO P1\ SMI 1\ PLO P1
-;;	GHI P1\ ADI 1\ PHI P1
-;;	SMI 192\ LBL GTEST2
-;;  RLDI(P1, $0000)\  RLDI(P2, $EF01)\ CALL(LINE)	; 0 < slope <= 1
-;;  RLDI(P1, $0000)\  RLDI(P2, $01BF)\ CALL(LINE)	; 1 <= slope
-;;  RLDI(P1, $0000)\  RLDI(P2, $EFEF)\ CALL(LINE)	; slope = 1
-;;  RLDI(P1, $0001)\  RLDI(P2, $EF00)\ CALL(LINE)	; 0 > slope >= -1
-;;  RLDI(P1, $00BF)\  RLDI(P2, $0100)\ CALL(LINE)	; slope <= -1
-;;  RLDI(P1, $EF00)\  RLDI(P2, $00EF)\ CALL(LINE)	; slope = -1
 	RLDI(P1,$0000)\ RLDI(P2,$EF00)\ CALL(LINE)\ LBDF CMDERR
 	RLDI(P1,$EF00)\ RLDI(P2,$EFBF)\ CALL(LINE)\ LBDF CMDERR
 	RLDI(P1,$EFBF)\ RLDI(P2,$00BF)\ CALL(LINE)\ LBDF CMDERR
@@ -1673,7 +1721,7 @@ GTEST:	CALL(CHKEOL)
 	RLDI(P1,$3CBF)\ RLDI(P2,$B400)\ CALL(LINE)\ LBDF CMDERR
 	RLDI(P1,$EF90)\ RLDI(P2,$0030)\ CALL(LINE)\ LBDF CMDERR
 	RLDI(P1,$0090)\ RLDI(P2,$EF30)\ CALL(LINE)\ LBDF CMDERR
-GTEST9:	RETURN
+GTEST9:	LBR	GWAIT
 
 	.SBTTL	Start BASIC Interpreter
 
@@ -2104,27 +2152,24 @@ VTPUTC:	PHI AUX\ SEX SP		; save character in a safe place
 	PUSHR(P1)		; ...
 	RLDI(T1,CURCHR)\ SEX T1	; point to our local storage
 	GHI AUX\ STXD		; move the character to CURCHR
-;;;	CALL(TMODE)		; be sure we're in text mode
-	SEX T1\ LDXA		; and then load ESCSTA
-	LBNZ	VTPUT2		; jump if we're processing an escape sequence
+	LDN T1\ LBNZ VTPUT2	; jump if ESCStA is not zero
 
 ; This character is not part of an escape sequence...
-	LDX\ ANI $7F		; get the character back and trim to 7 bits
-	LBZ	VTPUT9		; ignore null characters
-	XRI	$7F		; and ignore RUBOUT/DELETE too
-	LBZ	VTPUT9		; ...
-	LDX\ SMI ' '		; is this a control character ?
+VTPUT3:	INC T1\ LDN T1\ ANI $7F	; trim character to 7 bits
+	PHI AUX\ LBZ VTPUT9	;  ... and ignore null characters
+	XRI $7F\ LBZ VTPUT9	;  ... ignore RUBOUTs too
+	GHI AUX\ SMI ' '	; is this a control character ?
 	LBL	VTPUT1		; branch if yes
 
 ; This character is a normal, printing, character...
-	LDX\ CALL(NORMAL)	; display it as a normal character
+	GHI AUX\ CALL(NORMAL)	; display it as a normal character
 
 ;   And return...  It's a bit of extra work, but it's really important that
 ; we return the same value in D that we were originally called with.  Some
 ; code depends on this!
 VTPUT9:	RLDI(T1,CURCHR)		; gotta get back the original data
 	LDN T1\ PHI AUX		; save it for a moment
-	IRX\ POPR(P1)		; restore the registers we saved
+	SEX SP\ IRX\ POPR(P1)	; restore the registers we saved
 	POPR(T2)		; ...
 	POPRL(T1)		; ...
 ;  It's critical the we return with DF=0 for compatibility with SERPUT.  If
@@ -2132,7 +2177,7 @@ VTPUT9:	RLDI(T1,CURCHR)		; gotta get back the original data
 	CDF\ GHI AUX\ RETURN	; and we're done!
 
 ; Here if this character is a control character...
-VTPUT1:	LDX			; restore the original character
+VTPUT1:	GHI	AUX		; restore the original character
 	CALL(LBRI)		; and dispatch to the correct routine
 	 .WORD	 CTLTAB		; ...
 	LBR	VTPUT9		; then return normally
@@ -2157,8 +2202,14 @@ VTPUT2:	CALL(LBRI)		; branch to the next state in escape processing
 ;
 ; Uses T1 ...
 ;--
-NORMAL:	PHI	AUX		; save the character for a minute
-	RLDI(T1,ACSFLG)		; point T1 at the ACS/RVV flag
+NORMAL:	PUSHD			; save the character for a minute
+;   Be sure we're in text mode before sending anything to the screen.  Note
+; that this test is done AFTER checking for an escape sequence - that means
+; escape sequences that affect the text screen need to check separately, but
+; checking first makes graphics escape sequences impossible!
+	CALL(TMODE)		; be sure we're in text mode
+	POPD\ PHI AUX		; save the character to display
+	RLDI(T1,ACSFLG)		; and point T1 at the ACS/RVV flag
 
 	.IF (FONTSIZE == 64)
 ;++
@@ -2370,7 +2421,7 @@ NUMKPD:	RLDI(T1,KPDALT)		; same as above!
 	.SBTTL	Select Background Color
 
 ;++
-;   The <ESC>P command selects the background color for the screen.  This
+;   The <ESC>c command selects the background color for the screen.  This
 ; escape sequence needs a single argument, an ASCII character '0' .. '7'
 ; and that specifies the background color code.  Any character outside that
 ; range is ignored.
@@ -2390,7 +2441,7 @@ ESCP1:	LDI 0\ CALL(ESCNXT)	; set ESCSTA to zero for next time
 	.SBTTL	Select Foreground Colors
 
 ;++
-;   The <ESC>O command selects the color for the primary and alternate fonts.
+;   The <ESC>b command selects the color for the primary and alternate fonts.
 ; The escape sequence should be followed by a single character in the range
 ; 0x20 to 0x5F, the lower six bits of which select the colors.  The lowest
 ; three bits are the alternate font color, and the upper three bits are the
@@ -2411,7 +2462,7 @@ ESCO1:	LDI 0\ CALL(ESCNXT)	; first, set ESCSTA to zero
 
 ;   Compute an index into the COLORS table.  Note that if the table entry is
 ; 0xFF, then this color combination is impossible!
-	LDN T1\ SMI $20		; get the <ESC>O argument again
+	LDN T1\ SMI $20		; get the <ESC>b argument again
 	ADI LOW(COLORS)\ PLO P3	; and index into the COLORS table
 	LDI 0\ ADCI HIGH(COLORS); ...
 	PHI P3\ LDN P3\ XRI $FF	; is this combination impossible?
@@ -2608,7 +2659,7 @@ IDENT3:	CALL(SERPUT)		; ...
 ;	 .WORD	TABLE
 ;  	 .....
 ; TABLE: .WORD	fptr0	; address of routine 0
-;	 .WORD 	fptr1	;  "   "  "   "   "  1
+;	 .WORD	fptr1	;  "   "  "   "   "  1
 ;	 ....
 ;
 ;   Notice that the index starts with zero, not one, and that it's actually
@@ -2625,7 +2676,7 @@ IDENT3:	CALL(SERPUT)		; ...
 ;--
 LBRI:	SHL\ STR SP		; multiply the jump index by 2
 	LDA A\ PHI T1		; get the high byte of the table address
-	LDA A\ ADD\ PLO T1	; add the index to the low byte
+	LDA A\ ADD\ PLO T1	; add the index to the table address
 	GHI T1\ ADCI 0\ PHI T1	; then propagate the carry bit
 	RLDI(T2,LBRI1)\ SEP T2	; then switch the PC to T2
 
@@ -2691,8 +2742,8 @@ ESTATE:	.WORD	0		; 0 - never used
 	XX(EFIRST,ESCAP1)	; 1 - first character after <ESC>
 	XX(EYNEXT,DIRECY)	; 2 - <ESC>Y, get first byte (Y)
 	XX(EXNEXT,DIRECX)	; 3 - <ESC>Y, get second byte (X)
-	XX(EONEXT,ESCO1)	; 4 - <ESC>O, select foreground colors
-	XX(EPNEXT,ESCP1)	; 5 - <ESC>P, select background color
+	XX(EONEXT,ESCO1)	; 4 - <ESC>b, select foreground colors
+	XX(EPNEXT,ESCP1)	; 5 - <ESC>c, select background color
 
 	.SBTTL	Escape Sequence Dispatch Table
 
@@ -2714,7 +2765,7 @@ ESCCHRU:.WORD	UP		; <ESC>A -- cursor up
 	.WORD	RLF		; <ESC>I -- reverse line feed
 	.WORD	EEOS		; <ESC>J -- erase to end of screen
 	.WORD	EEOL		; <ESC>K -- erase to end of line
-	.WORD	NOOP		; <ESC>L -- unimplemented
+	.WORD	NOOP		; <ESC>L -- Unimplemented
 	.WORD	NOOP		; <ESC>M -- unimplemented
 	.WORD	NOOP		; <ESC>N -- unimplemented
 	.WORD	NOOP		; <ESC>O -- unimplemented
@@ -2775,7 +2826,7 @@ ESCCHRL:.WORD	NOOP		; <ESC>a -- unimplemented
 TAB:	RLDI(T1,CURSX)\ LDN T1	; get the current column of the cursor
 	SMI	MAXCOL-8-1	; are we close to the right edge of the screen?
 	LBGE	RIGHT		; just do a single right motion if we are
-	LDN T1\ ANI $F8		; no get the low 3 bits of the cursor column
+	LDN T1\ ANI $F8		; clear the low 3 bits of the address
 	ADI 8\ STR T1		; advance to the next multiple of 8
 	LBR	UPDCURS		; change the picture on the screen
 
@@ -2862,11 +2913,13 @@ SCRDW1: STR	T1		; update the top line on the screen
 ; to correspond to the new top line on the screen.  It needs to be called
 ; any time TOPLIN is changed (i.e. for any scrolling operation!).
 ;--
-UPDTOS:	RLDI(T1,TOPLIN)\ LDN T1	; find the address of the top of the screen
-	CALL(LINADD)		; ...
+UPDTOS:	RLDI(T1,GMODEF)\ LDN T1	; are we in graphics mode?
+	LBNZ	UPDTO9		; yes - no scrolling in graphcis mode!
 	CALL(SELIO0)		; select I/O group 0
+	RLDI(T1,TOPLIN)\ LDN T1	; find the address of the top of the screen
+	CALL(LINADD)		; ...
 	SEX P1\ OUT VISHMA	; update the HMA register
-	RETURN			; and we're done
+UPDTO9:	RETURN			; and we're done
 
 	.SBTTL	Screen Erase Functions
 
@@ -2884,7 +2937,8 @@ UPDTOS:	RLDI(T1,TOPLIN)\ LDN T1	; find the address of the top of the screen
 ;
 ; Uses T1, T2 and P1.
 ;--
-EEOS:	RLDI(T1,TOPLIN)\ LDN T1	; find the line that's on the top of the screen
+EEOS:	CALL(TMODE)		; be sure the text screen is displayed
+	RLDI(T1,TOPLIN)\ LDN T1	; find the line that's on the top of the screen
 	CALL(LINADD)		; then calculate its address in P1
 	RCOPY(T2,P1)		; put that address in T2 for a while
 	CALL(WHERE)		; and find out where the cursor is
@@ -2911,7 +2965,8 @@ EEOS2:	GLO P1\ STR SP		; get the low byte of the address (again!)
 ;
 ; Uses T1 and P1 ...
 ;--
-EEOL:	CALL(WHERE)		; set P1 = address of the cursor
+EEOL:	CALL(TMODE)		; be sure the text screen is displayed
+	CALL(WHERE)		; set P1 = address of the cursor
 	RLDI(T1,CURSX)\ LDN T1	; get the current column of the cursor
 	SMI MAXCOL\ PLO T1	; how many characters remain on this line
 EEOL1:	B_DISPLAY $		; synchronize PMEM access
@@ -2937,7 +2992,8 @@ EEOL2:	RLDI(T1,CURSCHR)	; point to CURSCHR
 ;
 ; Uses T1 and T2.
 ;--
-ERASE:	CALL(DSPOFF)		; turn the screen refresh off
+ERASE:	CALL(TMODE)		; be sure the text screen is displayed
+	CALL(DSPOFF)		; turn the screen refresh off
 	RLDI(T1,TOPLIN)		; set TOPLIN, cursor X and Y to zeros
 	LDI 0\ STR T1		; ...
 	INC T1\ STR T1		; ...
@@ -3056,7 +3112,8 @@ DOWN:	RLDI(T1,CURSY)\ LDN T1	; get the row number where the cursor is
 ; Uses T1 and T2 ...
 ;--
 ;;  NOP\ NOP\ NOP	; for alignment
-UPDCURS:CALL(WHERE)		; get the new cursor address and leave in P1
+UPDCURS:CALL(TMODE)		; be sure the text screen is displayed
+	CALL(WHERE)		; get the new cursor address and leave in P1
 	IOFF			; no interrupts for now
 	RLDI(T1,CURSADR)	; get the old cursor address
 	LDA T1\ PHI T2		; load the address of the character under
@@ -3376,8 +3433,6 @@ SPLAS4:	GLO T2\ STR T1		; display another ASCII character
 	OUTSTR(BRIGHTS)		;  ... to display the BASIC3 notice
 	.ENDIF
 
-  LBR SPLAS9
-
 ; Wait for input from either the keyboard or the serial port ...
 SPLAS8:	RLDI(T1,RXGETP)\ LDA T1	; get the receiver circular buffer pointer
 	SEX T1\ XOR		; does GETP == PUTP ?
@@ -3389,7 +3444,7 @@ SPLAS8:	RLDI(T1,RXGETP)\ LDA T1	; get the receiver circular buffer pointer
 ; All done ...
 SPLAS9:	CALL(RSTIO)		; reset the console input
 	CALL(ENACURS)		; and turn the cursor back on
-;;	CALL(ERASE)		; erase the screen
+	CALL(ERASE)		; erase the screen
 	RETURN			; all done
 
 	.SBTTL	Initialize VIS Display
@@ -3449,8 +3504,8 @@ VISINI:
 	RLDI2(P2,RVVMASK,DEFFORCLR)\ LDI 128\ CALL(LDFONT)
 	.ENDIF
 
-; Clear display memory and turn the display on.
-	LBR	ERASE		; ...
+; All done - it's up to the caller to turn the display on!
+	RETURN			; ...
 
 	.SBTTL	Music Notation
 
@@ -3800,12 +3855,13 @@ NOTED8:	LDA T1\ SHR		; get current tempo /2
 ; since there doesn't seem to be any harm in leaving CMEM access enabled at all
 ; times, but since we're here anyway ...
 ;
+;   * In graphics mode there's no scrolling, so when entering graphics we always
+; set the HMA to zero.  But when we return to text mode though, we need to
+; restore the correct HMA for the current TOPLIN.
+;
 ;   * And lastly we need to set or clear the GMODEF flag.  This is used by other
 ; parts of the code to find out which mode is currently active (remember that
 ; we can't read back the FLAGS I/O port!).
-;
-;   Do we also need to clear the HMA register here???  And reset it according
-; to TOPLIN when we switch back????
 ;--
 
 ; Switch to graphics mode ...
@@ -3826,10 +3882,10 @@ GMODE9:	SEX SP\ IRX\ POPRL(T1)	; restore T1
 
 ; Switch to text mode ...
 TMODE:	PUSHR(T1)		; save a temporary register
-	CALL(SELIO0)		; address the VIS chipset
 	RLDI(T1,GMODEF)\ LDN T1	; get the GMODEF flag
 	LBZ	GMODE9		; just quit now if we're already in text mode
 	LDI $00\ STR T1		;  ... otherwise set GMODEF = 0
+	CALL(SELIO0)		; address the VIS chipset
 	RCLR(T1)\ SEX T1	; clear the PMA register
 	OUT	VISPMA		; ...
 	RLDI(T1,VN.MODE)	; turn off CMEM access
@@ -4940,7 +4996,7 @@ SELIO1:	LDI FL.IO1		; select I/O group 1
 	RETURN			; and we're done
 
 	.SBTTL	Interrupt Service Routine
-	PAGE
+	PAGE	;; for alignment!!!!
 ;++
 ;   Branch here to return from the current interrupt service routine.  Restore
 ; the current I/O group first (see the code at SELIO0/1 for that story), then
@@ -4980,14 +5036,22 @@ ISR:	DEC SP\ SAV		; save T (the old X,P) on the stack first
 ; Decode the interrupt source, then branch to ISRRET when done ...
 	BN_SLUIRQ ISR1		; skip if it's not the SLU inrerrupting
 	LBR	SLUISR		; go service SLU interrupts
+; Next, check for keyboard interrupts ...
+ISR1:	BN_KEYIRQ ISR2		; skip if it's not a keyboard interrupt
+	LBR	KEYISR		; go service keyboard interrupts
+;   Always check for video interrupts last.  That's because video interrupts
+; are caused by the VISIRQ flip flop, which is reset as soon as the VIDISR is
+; called the first time. BUT, we don't have a way to test the VISIRQ F-F
+; directly; B_DISPLAY tests the PREDISPLAY output from the VIS, which remains
+; active for the entire blanking interval.  That means if another interrupt,
+; say PS/2, comes in after the VISIRQ but while PREDISPLAY is still active, 
+; we'll get stuck on the B_DISPLAY!
+;
 ;   Note that B_DISPLAY is true while the display is active, and we get an
 ; interrupt when the display is NOT active, so it's B_DISPLAY to branch around
 ; the call to VIDISR!
-ISR1:	B_DISPLAY ISR2		; skip if display active
+ISR2:	B_DISPLAY ISR3		; skip if display active
 	LBR	VISISR		; go service display interrupts
-; Lastly, check for keyboard interrupts ...
-ISR2:	BN_KEYIRQ ISR3		; skip if it's not a keyboard interrupt
-	LBR	KEYISR		; go service keyboard interrupts
 ISR3:
 
 ;   We get here if we can't identify the interrupt source.  That's probably 
@@ -5191,8 +5255,9 @@ SLUI10:	RLDI(T1,TXGETP)\ LDA T1	; load the GET pointer
 ; need to clear the TR bit.  That alone doesn't do much, however the next
 ; time we have something to transmit then SERPUT will set the TR bit and
 ; that will cause another THRE interrupt to start the process again.
-SLUIS2:	SEX INTPC\ OUT SLUCTL	; DON'T use OUTI!
-	.BYTE	SL.8N1+SL.IE	;  ... clear TR
+SLUIS2:	RLDI(T1,SLUFMT)\ LDN T1	; get the current SLU format bits
+	STR SP\ SEX SP		; store it on the stack
+	OUT SLUCTL\ DEC SP	; and clear TR
 				; and fall into SLUIS3
 
 ;   Here after we've checked both the receiver and transmitter.  The CDP1854
@@ -5353,6 +5418,8 @@ SERPUW:	CALL(SERPUT)		; try to buffer this character
 	LBDF	SERPUW		; keep waiting until space is available
 	RETURN			; ...
 
+	.SBTTL	Serial Port Break Routines
+
 ;++
 ;   Test the serial port break flag and return DF=1 (and also clear the flag)
 ; if it's set. 
@@ -5366,7 +5433,87 @@ ISSBR1:	CDF			; return DF=0
 	IRX\ POPRL(T1)		; restore T1
 	RETURN			; and we're done
 
+;++
+;   Transmit a break on the serial port by setting the FORCE BREAK bit in the
+; CDP1854 control register.  This will force the UART's TXD output low to
+; transmit a space condition for as long as the force break bit is set.
+; To be detected by the other end we have to remain in this condition for at
+; least as long as one character time.  A shorter time may not work, but longer
+; does no harm (except to slow things down).
+;
+;   The way you time this with most UARTs is to set the force break bit and
+; then transmit some arbitrary data byte.  The byte never actually gets sent
+; (because TXD is held low) but the shift register timing still works and we
+; can simply wait for that to finish.  Unfortunately, this DOESN'T WORK with
+; the CDP1854!  The 1854 freezes the transmitter entirely while the force
+; break bit is set, and nothing will happen with the transmitter status as
+; long as it is.
+;
+;   So we're stuck with timing the interval manually, and we have to be sure
+; that it's longer than the time it would take to transmit one byte at the
+; slowest baud rate we support.  Worse, once we clear the force break bit,
+; the CDP1854 needs us to transmit a byte, which will be turned into garbage
+; by the other end since there will be no start bit, to finally and completely
+; clear the break condition.  Seems like RCA could have done better!
+;--
+TXSBRK:	PUSHR(T1)		; save a temporary register
+; Set the force break bit in the CDP1854 ...
+	RLDI(T1,SLUFMT)\ LDN T1	; get the current SLU character format
+	ANI ~SL.IE\ ORI SL.BRK	; clear IE and set break
+	STR	SP		; save for out
+	OUT SLUCTL\ DEC SP	; write the UART control register
+; Now delay for 100ms ...
+	LDI 50\ PLO T1		; 50 iterations ...
+TXSBR2:	DLY2MS			; ... of a 2ms delay
+	DEC T1\ GLO T1		; ...
+	LBNZ	TXSBR2		; ...
+; Reset the CDP1854 control register and clear the force break bit ...
+	LDN	SP		; it's still on the stack!
+	ANI ~SL.BRK\ ORI SL.IE	; ...
+	STR	SP		; ...
+	OUT SLUCTL\ DEC SP	; ...
+;   The CDP1854 needs us to transmit a byte, which will be turned into garbage
+; by the other end since there will be no start bit, to finally and completely
+; clear the break condition.  Note that we don't bother to check THRE here -
+; we've just delayed for 100ms; I'm pretty sure it's done now!
+	LDI 0\ STR SP		; transmit a null byte
+	OUT SLUBUF\ DEC SP	;  ...
+; Finish by flushing the serial buffers ...
+TXSBR4:	CALL(SERCLR)		; flush the TX and RX buffers
+	IRX\ POPRL(T1)		; restore T1
+	RETURN			; and we're done
+
 	.SBTTL	Initialize Serial Port
+
+;++
+;   This routine will clear the serial port buffers, both transmit and receive.
+; Any characters currently in the buffers are lost!  If flow control is enabled,
+; then we will re-enable the other end (either by asserting CTS or sending XON)
+; immediately after we're done.
+;--
+SERCLR:	PUSHR(T1)		; save a temporary
+	RLDI(T1,RXPUTP)		; point to the buffer pointers
+	IOFF			; no interrupts while we mess with the pointers
+	LDI 0\ SEX T1		; ...
+	STXD\ STXD		; clear RXPUTP and RXGETP
+	STXD\ STXD		; clear TXPUTP and TXGETP
+	RLDI(T1,TXONOF)		; clear the XON/XOFF flow control state
+	LDI 0\ STXD		; ...
+	DEC T1\ STXD		; and clear RXBUFC too
+	ION			; interrupts are safe again
+	RLDI(T1,FLOCTL)\ LDN T1	; see if flow control is enabled
+	LBZ	SERCL9		; not enabled
+	XRI $FF\ LBZ SERCL1	; branch if XON/XOFF flow control
+; Here for CTS flow control ...
+	OUTI(FLAGS, FL.SCTS)	; yes - enable CTS again
+	LBR	SERCL9		; and we're done
+;   Here for XON/XOFF flow control ...  Note that this ALWAYS sends an XON, 
+; even if no XOFF has recently been sent.  This should be harmless!
+SERCL1:	INC T1\ LDI 1\ STR T1	; send an XON ASAP
+	OUTI(SLUCTL, SL.TR)	; and always set the TR bit
+SERCL9:	SEX SP\ IRX\ POPRL(T1)	; restore T1
+	RETURN			; and we're done here
+
 
 ;++
 ;   This routine will initialize the CDP1854 serial port and CDP1963 baud rate
@@ -5403,6 +5550,8 @@ SERIN2:	LDI SL.8N1\ STR SP	; select no parity and 8 data bits
 	GLO T1\ OR		; and OR those with the stop bit select
 	ORI SL.IE\ STR SP	; always set interrupt enable
 	OUT SLUCTL\ DEC SP	; write the UART control register
+	RLDI(T1,SLUFMT)		; and save the UART settings here
+	LDN SP\ STR T1		;  ... for later
 
 ; Select XON/XOFF or CTS flow control according to SW5 ...
 	RLDI(T1,FLOCTL)		; point at the flow control flag
@@ -5424,33 +5573,6 @@ BAUDS:	.BYTE	BAUD_DIVISOR( 110)	; 0   0   0	 110
 	.BYTE	BAUD_DIVISOR(2400)	; 1   0   1	2400
 	.BYTE	BAUD_DIVISOR(4800)	; 1   1   0	4800
 	.BYTE	BAUD_DIVISOR(9600)	; 1   1   1	9600
-
-;   This is a table of baud rate names to show the status on the splash screen.
-; Unfortunately we don't have a decimal print routine, so these are stored in
-; plain ASCII ...
-BAUDN:	.WORD	BD110N, BD150N, BD300N, BD600N
-	.WORD	BD1K2N, BD2K4N,	BD4K8N, BD9K6N
-BD110N:	.TEXT	 "110\000"
-BD150N:	.TEXT	 "150\000"
-BD300N:	.TEXT	 "300\000"
-BD600N:	.TEXT	 "600\000"
-BD1K2N:	.TEXT	"1200\000"
-BD2K4N:	.TEXT	"2400\000"
-BD4K8N:	.TEXT	"4800\000"
-BD9K6N:	.TEXT	"9600\000"
-
-;   And this is a table of the format names selected by SW3, SW4 and SW5.
-; Like BAUDN, this is used to display the serial status on the splash screen.
-FMTN:	.WORD	FM8N2, FM8N1, FM8E2, FM8E1
-	.WORD	FM7N2, FM7N1, FM7E2, FM7E1
-FM8N2:	.TEXT	"8N2\000"
-FM8N1:	.TEXT	"8N1\000"
-FM8E2:	.TEXT	"8E2\000"
-FM8E1:	.TEXT	"8E1\000"
-FM7N2:	.TEXT	"7N2\000"
-FM7N1:	.TEXT	"7N1\000"
-FM7E2:	.TEXT	"7E2\000"
-FM7E1:	.TEXT	"7E1\000"
 
 	.SBTTL	Keyboard Buffer Routines
 
@@ -5541,12 +5663,20 @@ KEYGE1:	SDF			; buffer empty - return DF=1
 ;--
 ISKBRK:	PUSHR(T1)		; save a temporary
 	RLDI(T1,KEYBRK)\ LDN T1	; get the flag setting
-	LBZ	ISKBR1		; branch if it's not set
+ISKBR0:	LBZ	ISKBR1		; branch if it's not set
 	LDI 0\ STR T1		; clear the flag
 	SDF\ LSKP		; and return DF=1
 ISKBR1:	CDF			; return DF=0
 	IRX\ POPRL(T1)		; restore T1
 	RETURN			; and we're done
+
+;++
+;   Test the keyboard menu flag and return DF=1 (and also clear the flag) if
+; it's set.
+;--
+ISKMNU:	PUSHR(T1)		; save a temporary
+	RLDI(T1,KEYMNU)\ LDN T1	; get the flag setting
+	LBR	ISKBR0		; and the rest is the same as ISKBRK
 
 	.SBTTL	Keyboard Escape Code Table
 
@@ -6045,7 +6175,7 @@ SRETURN:PHI	AUX		; save D temporarily
 	GHI	AUX		; restore D
 	BR	SRETURN-1	; restore RETPC and return to the caller
 
-	.SBTTL	ASCII Character Font
+	.SBTTL	ASCII Character Fonts
 
 FONT:
 	.IF (FONTSIZE == 64)
@@ -6058,7 +6188,7 @@ FONT:
 	.ECHO	"**** FONTSIZE WRONG! *****\n"
 	.ENDIF
 
-	.SBTTL	The End
+	.SBTTL	EPROM Checksum
 
 	.ORG	CHKSUM-2
 	.BLOCK	4
