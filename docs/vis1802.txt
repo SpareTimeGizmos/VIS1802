@@ -23,11 +23,6 @@ HARDWARE NOTES
 	$7400..$7FFB - help and menu text
 	$7FFC..$7FFF - checksum
 
-  JUMPERS
-
-  The SYNC POLARITY jumpers control the polarity of the HSYNC and VSYNC signals present at the CGA connector.  An installed jumper gives a positive going sync pulse, and a jumper removed gives a negative going pulse.  A normal IBM CGA monitor (or an EGA monitor in CGA mode) wants positive going pulses for both horizontal and vertical sync, and requires both jumpers be installed.  Note that these jumpers have no effect on the CVBS composite nor RGB outputs.
-
-  The two PAL/NTSC jumpers select (what else?) PAL or NTSC timing and composite video output.  Note that the composite video is affected only if the 1870 is used, however the video timing will change at the 
   DIP switch settings
 
   SW3 SW2 SW1	BAUD
@@ -62,14 +57,30 @@ HARDWARE NOTES
   PS/2 OK - turns on when the PS/2 APU firmware finishies initialization.  It turns off whenever the APU has keyboard input waiting for the 1802, and then back on again when the 1802 firmware reads it.  Because the 1802 firmware is interrupt driven normally you won't see this LED turn off at all, unless something crashes.
   
   VIS CHIPSET
-    The RCA VIS chipset consists of two chips; the first is the CDP1869 which handles the memory addressing and also does the sound generation.  The second chip can be EITHER the CDP1870 or the CDP1876.  The CDP1870 generates a composite NTSC or PAL color output.  The CDP1870 can drive a CGA type monitor, however only in monochrome.
+  The RCA VIS chipset consists of two chips; the first is the CDP1869 which handles the memory addressing and also does the sound generation.  The second chip can be EITHER the CDP1870 or the CDP1876.  The CDP1870 generates a composite NTSC or PAL color output.  The CDP1870 can drive a CGA type monitor, however only in monochrome.
 
-   The CDP1876 provides an RGB output and can drive either an analog RGB monitor with composite sync on green, or a proper CGA monitor with separate horizontal and veretical sync.  Either chip is interchangeable in the VIS1802 and you can simply plug in either one, however the outputs you get will depend on the chip used.
+   The CDP1876 provides an RGB output and can drive either an analog RGB monitor with composite sync on green, or a proper CGA monitor with separate horizontal and vertical sync.  Either chip is interchangeable in the VIS1802 and you can simply plug in the one you want, however the outputs you get will depend on the chip used.
 
   IMPORTANT - the 14.31818Mhz oscillator is still required by the VIS1802, even if the CDP1876 is used, because this also provides the clock for the 89C4051 PS/2 keyboard APU!
 
   Unlike the VT1802/i8275, the VIS chipset timing is pretty much hardwired by RCA and can't be changed.  The pixel clock should be 5.67MHz and this generates a 40 column by 24 line text display, or a 240x192 pixel graphics display.  This will also give the standard 60Hz vertical and 15,750Hz horizontal video timing.
    
+  CPU CLOCK
+  Normally the CPU clock is connected to the 2.835MHz clock provided by the VIS chipset by installing jumper JP1.  If you select this option, then do not install Y1, C1, C2 or R1.   However if you wish you can select a different CPU clock by removing JP1 and installing Y1, C1, C2 and R1.
+
+  The video timing and baud rates are unaffected by the CPU clock, HOWEVER the tone and noise generator in the CDP1869 is clocked by TPB so changing the CPU clock will change all the tone frequencies.  You'll need to adjust the firmware and rebuild it to compensate for that.
+
+  JUMPERS
+  JP1 selects the CPU clock (see above).
+
+  JP2 enables PMA10 to address the second page of text/page memory.  The current firmware doesn't use this option and JP2 SHOULD BE REMOVED.
+  
+  JP5 selects NTSC (525 line/60Hz) or PAL (625 line/50Hz) timing from the CDP1870.  JP8 selects whether the NTSC or PAL color burst is applied to the CVBS output.  Normally both of these should be installed in agreement (i.e. either NTSC or PAL).
+
+  JP6 and JP7 select the polarity of the HSYNC and VSYNC signals present at the CGA connector.  An installed jumper gives a positive going sync pulse, and a jumper removed gives a negative going pulse.  A normal IBM CGA monitor (or an EGA monitor in CGA mode) wants positive going pulses for both horizontal and vertical sync, and requires both jumpers be installed.  Note that these jumpers have no effect on the CVBS composite nor RGB outputs.
+
+  JP10 if installed tells the PS/2 APU to swap the functions of the CAPS LOCK and CONTROL keys.  JP4 removed leaves these keys as labeled.
+  
   CONNECTORS
   PS/2 - standard IBM PC, AT or PS/2 style keyboard, depending on the connector you provide.  There are only four signals on this connector - +5, ground, clock and data.
   
@@ -303,30 +314,3 @@ HEL[p]				-- print this text
 ; any text			-- comment command procedures
 ^C				-- cancel current command line
 <BREAK>				-- interrupt execution of long commands
-
-STUFF THAT NEEDS TO BE DONE!
---------------------------------------------------------------------------------
-
-  * Add graphics functions via serial port - <ESC>e, g, l, and p
-  * Add auto newline <ESC>v and w.
-  * Distinguish between auto new line and auto line wrap?
-    Auto newline means that whenever the terminal receives a <CR> it
-      automatically adds an <LF> as well.  Unfortunately, if we receive <CRLF>
-      then the text is double spaced!
-    Auto line wrap means that when receiving text and the cursor hits the
-      right edge of the screen, the cursor automatically wraps around to the
-      left edge of the next line.   If auto line wrap is disabled then the
-      cursor "sticks" at the right edge and subsequent characters just overwrite
-      until a <CRLF> is received.
-    Currently the code DOES auto line wrap and DOES NOT do auto new line!
-  * Add keyboard shortcuts (function keys?) to flip between text and graphics
-  * Put BOTH 64 and 128 character fonts in ROM and add escape sequences to
-    switch between them
-  * Use the second PMEM page as the BASIC text display.  Now we can have BOTH
-    the remote terminal AND BASIC in local mode active at the same time.  Add
-    Keyboard shortcut to switch between BASIC and terminal modes.
-  * The set color sequences need to hide/show the cursor.
-  * Expect an 1805 CPU and try to speed up the code by replacing the macros
-    with built-in 1805 instructions, especially RLDI, SCAL, SRET, etc.
-  * See if we can't improve performance by queueing up simple screen updates
-    (e.g. ones which only increment the cursor) during the VBI.

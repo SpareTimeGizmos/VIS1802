@@ -251,12 +251,33 @@ VERMAJ	.EQU	1	; major version number
 VEREDT	.EQU	70	; and the edit level
 
 ; TODO LIST!
+;  * Add graphics functions via serial port - <ESC>e, g, l, and p
 ;  * support for setting colors in graphics mode
-;  * draw lines or plot points via escape sequences
 ;  * play music via escape sequences
-;  * have both 64 and 128 character fonts in ROM; escape sequence to switch
-;  * downloadable fonts, sprites, etc
 ;  * really slow (the effective baud rate is about 300!)
+;  * Add auto newline <ESC>v and w.
+;  * Distinguish between auto new line and auto line wrap?
+;    Auto newline means that whenever the terminal receives a <CR> it
+;      automatically adds an <LF> as well.  Unfortunately, if we receive <CRLF>
+;      then the text is double spaced!
+;    Auto line wrap means that when receiving text and the cursor hits the
+;      right edge of the screen, the cursor automatically wraps around to the
+;      left edge of the next line.   If auto line wrap is disabled then the
+;      cursor "sticks" at the right edge and subsequent characters just
+;      overwrite until a <CRLF> is received.
+;    Currently the code DOES auto line wrap and DOES NOT do auto new line!
+;  * Add keyboard shortcuts (function keys?) to flip between text and graphics
+;  * Put BOTH 64 and 128 character fonts in ROM and add escape sequences to
+;    switch between them
+;  * downloadable fonts, sprites, etc
+;  * Use the second PMEM page as the BASIC text display.  Now we can have BOTH
+;    the remote terminal AND BASIC in local mode active at the same time.  Add
+;    Keyboard shortcut to switch between BASIC and terminal modes.
+;  * The set color sequences need to hide/show the cursor.
+;  * Expect an 1805 CPU and try to speed up the code by replacing the macros
+;    with built-in 1805 instructions, especially RLDI, SCAL, SRET, etc.
+;  * See if we can't improve performance by queueing up simple screen updates
+;    (e.g. ones which only increment the cursor) during the VBI.
 
 	.SBTTL	Hardware Definitions
 
