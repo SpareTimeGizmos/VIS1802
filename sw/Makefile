@@ -32,20 +32,28 @@
 # 24-Apr-24	RLA	New file.
 # 29-APR-24	RLA	Add help file.
 # 20-MAY-24	RLA	Add BASIC3.
+# 30-NOV-24	RLA	Use "shell which" to find tools (thanks, David!)
+#			Make FONTSIZE an explicit parameter.
 #--
 
+#   VIS1802 assembly options.  FONTSIZE must be either 64 or 128, and CPUCLOCK
+# must be either # 2835000Hz or 3579545Hz.
+FONTSIZE=64
+CPUCLOCK=2835000
+
 # Tool paths and options - you can change these as necessary...
-TASM=D:/bob/bin/tasm/tasm
-export TASMTABS=D:/bob/bin/tasm/
-TASMOPTS=-t1802 -x1 -lat -g0 -i -p44 -DTASM -DVIS1802
-A18=d:/bob/bin/a18
-ROMMERGE=D:/bob/bin/rommerge.exe
-ROMCKSUM=D:/bob/bin/romcksum.exe
-ROMTEXT=D:/bob/bin/romtext.exe
+TASM=$(shell which tasm)
+export TASMTABS=$(dir $(TASM))
+TASMOPTS=-t1802 -x1 -lat -g0 -i -p44 -DTASM -DVIS1802 \
+	 -DCPUCLOCK=$(CPUCLOCK) -DFONTSIZE=$(FONTSIZE)
+A18=$(shell which a18)
+ROMMERGE=$(shell which rommerge)
+ROMCKSUM=$(shell which romcksum)
+ROMTEXT=$(shell which romtext)
 ZIP=C:/Program Files/7-Zip/7z.exe
-RM=C:/cygwin64/bin/rm.exe
-ECHO=C:/cygwin64/bin/echo.exe
-DATE=C:/cygwin64/bin/date.exe
+RM=$(shell which rm)
+ECHO=$(shell which echo)
+DATE=$(shell which date)
 
 # All components of the EPROM image ...
 HEXFILES = vis1802.hex basic3.hex help.hex
