@@ -314,3 +314,41 @@ HEL[p]				-- print this text
 ; any text			-- comment command procedures
 ^C				-- cancel current command line
 <BREAK>				-- interrupt execution of long commands
+ASSEMBLING THE SOURCE
+--------------------------------------------------------------------------------
+  To rebuild the EPROM image you will need all the source files from the Spare Time Gizmos github VIS1802 repository.  You will also need these tools -
+
+  tasm     - Telemark crosss assembler v3.5
+  	     download from https://github.com/SpareTimeGizmos/tools/tree/main/tasm35
+  a18      - A18 cross assembler from Herb Johnson's site
+  	     download from https://www.retrotechnology.com/memship/a18.zip
+  romtext  - Spare Time Gizmos tool to add help text to EPROM images
+  	     download from https://github.com/SpareTimeGizmos/tools/tree/main/romtext
+  rommerge - Spare Time Gizmos tool to merge hex files into one EPROM image
+  	     download from https://github.com/SpareTimeGizmos/tools/tree/main/rommerge
+  romcksum - Spare Time Gizmos tool to add checksums to EPROM images
+  	     download from https://github.com/SpareTimeGizmos/tools/tree/main/romcksum
+
+You will need to compile and build all of these tools and copy them to a directory that's included in your path, such as /usr/local/bin.  Once you have done this, you can simply change directory to VIS1802/sw and type
+
+	make
+
+This will automatically
+
+	1) assemble the VIS1802 firmware with TASM
+	2) assemble BASIC with A18
+	3) convert the help text to an Intel hex file
+	4) merge all the above hex files together
+	5) compute and add the checksum to the merged file
+
+The result will be a single file, eprom.hex, which contains the firmware for the VIS1802.  This file is ready for burning into a 27C256 EPROM.
+
+By default the Makefile will generate firmware for a 64 character font and a 2.835MHz CPU clock (see discussion of fonts and CPU clocks, above).  To build firmware for a different configuration, you can say
+
+	make CPUCLOCK=3579545
+  - or -
+  	make FONTSIZE=128
+  - or even -
+  	make CPUCLOCK=3579545 FONTSIZE=128
+
+Note that the clock frequencies must be specified in HERTZ, not MHz.  Currently 2.835MHz and 3.579545MHz are the only CPU clock frequencies supported by the firmware, and 64 or 128 are the only supported font sizes.  You can add others, but you will need to modify the VIS1802 source to do it.
