@@ -249,12 +249,13 @@
 ;
 ; 071	-- Make FONTSIZE a Makefile parameter.  Add CPUCLOCK assembly option
 ;	   to the Makefile also.  Add option for 3.579545MHz CPU clock.
+;
+; 072	-- Add NOTES table for 5.579545MHz clock.
 ;--
 VERMAJ	.EQU	1	; major version number
-VEREDT	.EQU	71	; and the edit level
+VEREDT	.EQU	72	; and the edit level
 
 ; TODO LIST!
-;  * Add NOTES for 3.579MHz clock
 ;  * Add graphics functions via serial port - <ESC>e, g, l, and p
 ;  * support for setting colors in graphics mode
 ;  * play music via escape sequences
@@ -3746,14 +3747,14 @@ PNOTE9:	SDF\ RETURN		; return DF=1 and leave P1 unchanged
 	.IF	CPUCLOCK == 2835000
 NOTES:	.DB	'C',     $54	; 0 middle C (with octave == 3)
 	.DB	'C'+80H, $4F	; 1 C#/D-
-	.DB	'D',     $4A	; 2 D
-	.DB	'D'+80H, $46	; 3 D#/E-
-	.DB	'E',     $42	; 4 E
-	.DB	'F',	 $3E	; 5 F
+	.DB	'D',     $4B	; 2 D
+	.DB	'D'+80H, $47	; 3 D#/E-
+	.DB	'E',     $43	; 4 E
+	.DB	'F',	 $3F	; 5 F
 	.DB	'F'+80H, $3B	; 6 F#/G-
 	.DB	'G',	 $38	; 7 G
-	.DB	'A'+80H, $34	; 8 G#/A-
-	.DB	'A',     $31	; 9 A
+	.DB	'A'+80H, $35	; 8 G#/A-
+	.DB	'A',     $32	; 9 A
 	.DB	'B'+80H, $2F	;10 A#/B-
 NOTEND:	.DB	'B',	 $2C	;11 B
 	.DB	0
@@ -3761,7 +3762,19 @@ NOTEND:	.DB	'B',	 $2C	;11 B
 
 ; Note frequencies for a 3.579545MHz CPU clock ...
 	.IF	CPUCLOCK == 3579545
-; TBA!!!
+NOTES:	.DB	'C',     $6A	; 0 middle C (with octave == 3)
+	.DB	'C'+80H, $64	; 1 C#/D-
+	.DB	'D',     $5F	; 2 D
+	.DB	'D'+80H, $59	; 3 D#/E-
+	.DB	'E',     $54	; 4 E
+	.DB	'F',	 $50	; 5 F
+	.DB	'F'+80H, $4B	; 6 F#/G-
+	.DB	'G',	 $47	; 7 G
+	.DB	'A'+80H, $43	; 8 G#/A-
+	.DB	'A',     $3F	; 9 A
+	.DB	'B'+80H, $3B	;10 A#/B-
+NOTEND:	.DB	'B',	 $38	;11 B
+	.DB	0
 	.ENDIF
 
 	.SBTTL	Shift Octaves and Change Note Duration
