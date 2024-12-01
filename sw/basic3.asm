@@ -402,7 +402,7 @@ COMLIB	DB	0A4H, 'R', 'E', 80H+'M', 080H				;..REM
 	DB	066H, 'D', 'L', 'O', 'A', 80H+'D', 0A1H			;..DLOAD
 	DB	0A5H, 'P', 'L', 'A', 80H+'Y', 0A2H			;[RLA] PLAY was ..ENINT
 ;	DB	067H, 'D', 'I', 'S', 'I', 'N', 80H+'T', 0A3H		;[RLA] was ..DISINT
-	DB	069H, 'G', 'R', 'A', 'P', ,'H', 'I', 'C', 80H+'S', 0A4H	;[RLA] GRAPHICS was ..DMAPT
+	DB	069H, 'G', 'R', 'A', 'P', 'H', 'I', 'C', 80H+'S', 0A4H	;[RLA] GRAPHICS was ..DMAPT
 	DB	064H, 'T', 'I', 80H+'N', 0A5H				;..TIN
 	DB	065H, 'T', 'O', 'U', 80H+'T', 0A6H			;..TOUT
 	DB	066H, 'T', 'R', 'A', 'C', 80H+'E', 0A7H			;..TRACE
