@@ -4505,11 +4505,13 @@ XTABLE:	.DB	 0,$20,  0,$08,  0,$02	;   0<=X<  6
 ;++
 ; Scan two hexadecimal parameters and return them in registers P4 and P3...
 ;--
-HEXNW2:	CALL(HEXNW)		; scan the first parameter
-	RCOPY(P3,P2)		; and save it
-	CALL(ISEOL)		; there had better be more there
-	LBDF	CMDERR		; error if not
-				; fall into HEXNW to get another
+HEXNW2:    CALL(HEXNW)        ; scan the first parameter
+    RCOPY(P3,P2)        ; return first parameter in P3
+    CALL(ISEOL)        ; there had better be more there
+    LBDF    CMDERR        ; error if not
+    CALL(HEXNW)        ; scan the second parameter
+    RCOPY(P4,P2)        ; return second parameter in P4
+    RETURN            ; and we're done
 
 ;++
 ;   Scan a single hexadecimal parameter and return its value in register P2.
