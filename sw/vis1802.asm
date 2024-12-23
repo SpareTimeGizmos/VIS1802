@@ -251,9 +251,11 @@
 ;	   to the Makefile also.  Add option for 3.579545MHz CPU clock.
 ;
 ; 072	-- Add NOTES table for 5.579545MHz clock.
+;
+; 073   -- Copied OUTPUT and HEXNW2 routines from latest VT1802 code. To correct XS/XL
 ;--
 VERMAJ	.EQU	1	; major version number
-VEREDT	.EQU	72	; and the edit level
+VEREDT	.EQU	73	; and the edit level
 
 ; TODO LIST!
 ;  * Add graphics functions via serial port - <ESC>e, g, l, and p
@@ -1371,19 +1373,19 @@ INPUT:	CALL(HEXNW)		; read the port number
 ; Like INPUT, this command always accesses ports in I/O group 1.  If you want
 ; to access the VIS chip set, then use the VIS command instead.
 ;--
-OUTPUT:	CALL(HEXNW2)		; read the port number and the byte
-	CALL(CHKEOL)		; there should be no more
-	RLDI(P4,IOT)		; point P4 at the IOT buffer
-	GLO P3\ ANI 7		; get the port address
-	LBZ	CMDERR		; error if port 0 selected
-	ORI $60\ STR P4\ INC P4	; turn it into an output instruction
-	GLO P2\ STR P4\ INC P4	; store the data byte inline
-	LDI $D0+PC\ STR P4	; store a "SEP PC" instruction
-	DEC P4\ DEC P4		; back to IOT:
-	CALL(SELIO1)		; select I/O group 1
-	SEX	P4		; set X=P for IOT
-	SEP	P4		; now call the output routine
-	RETURN			; and we're done
+OUTPUT:    CALL(HEXNW2)          ; P3 == port, P4 == data byte
+     CALL(CHKEOL)          ; there should be no more
+     RLDI(P2,IOT)          ; point P2 at the IOT buffer
+     GLO P3\ ANI 7         ; get the port address
+     LBZ  CMDERR          ; error if port 0 selected
+     ORI $60\ STR P2\ INC P2    ; turn it into an output instruction
+     GLO P4\ STR P2\ INC P2     ; store the data byte inline
+     LDI $D0+PC\ STR P2    ; store a "SEP PC" instruction
+     DEC P2\ DEC P2        ; back to IOT:
+     CALL(SELIO1)          ; select I/O group 1
+     SEX  P2         ; set X=P for IOT
+     SEP  P2         ; now call the output routine
+     RETURN                ; and we're done
 
 	.SBTTL	XMODEM Load and Save
 
