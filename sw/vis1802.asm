@@ -252,10 +252,21 @@
 ;
 ; 072	-- Add NOTES table for 5.579545MHz clock.
 ;
-; 073   -- Copied OUTPUT and HEXNW2 routines from latest VT1802 code. To correct XS/XL
+; 073   -- Copied OUTPUT and HEXNW2 routines from latest VT1802 code to correct
+;	    XS/XL commands.
+;
+; 074	-- Fix startup bug - splash screen prevents startup in terminal mode.
+;
+; 075	-- Make DLY2MS macro work for CPUCLOCK .GT. 4MHz
+;	   Speed up the tempo slightly in PLAY (HERTZ/3, not /2)
+;
+; 076	-- Add build options (CPUCLOCK, FONTSIZE) to startup/splash messages.
+;
+; 077	-- Compute NOTES table dynamically based on CPUCLOCK.  Start CDP1869
+;	    prescaller one octave lower for CPUCLOCK .GT. 4Mhz.  Make the
+;	    bell tone always be 440Hz regardless of CPU clock.
 ;--
-VERMAJ	.EQU	1	; major version number
-VEREDT	.EQU	73	; and the edit level
+VEREDT	.EQU	77	; and the edit level
 
 ; TODO LIST!
 ;  * Add graphics functions via serial port - <ESC>e, g, l, and p
@@ -359,11 +370,11 @@ VC.BKGG   .EQU	  $01	;    "     "     "   GREEN
 ; VIS CDP1869 tone generator port ...
 ;   Note that this register is 16 bits!!
 VISTONE	.EQU	4	; standard VIS port address
-VT.AMPL   .EQU    $000F	;   tone amplitude control
-VT.FSEL   .EQU	  $0070	;   frequency (octave) divider
+VT.AMPM   .EQU    $000F	;   tone amplitude control mask
+VT.OCTM   .EQU	  $0070	;   octave (TPB divider) mask
+VT.TONM   .EQU	  $7F00	;   tone divisor mask
 VT.TOFF   .EQU	  $0080	;   1 -> tone off
-VT.TDIV   .EQU	  $7F00	;   tone divisor mask
-VT.BELL   .EQU	  $313F	;   440Hz, full volume
+VT.DVOL   .EQU	  $000F	; default volume for bell and music
 
 ; VIS CDP1869 noise/configuration port ...  16 bits!
 VISCONF	.EQU	5	; standard VIS port address
@@ -453,6 +464,7 @@ HERTZ	  .EQU	60		; VISISR interrupt frequency
 SCANLINES .EQU	 8		; scan lines per font glyph
 CMDMAX	  .EQU	64		; maximum command line length
 BELLTIME  .EQU  HERTZ/2		; delay (in VISISR ticks) for ^G bell
+NOTETIME  .EQU	HERTZ/3		; default music player tempo
 BLINKTIME .EQU	250		; delay in milliseconds when blinking the LED
 DEFFORCLR .EQU  $C0		; default CCB1/0 for forground font
 DEFALTCLR .EQU  $00		; default CCB1/0 for alternate font
@@ -573,25 +585,20 @@ AUX	.EQU	$F	; used by SCRT to preserve D
 #define LBL	LBNF
 #define LSL	LSNF
 
-;   This delay macro is calculated based on a 2.835MHz clock frequency.  Each
-; major cycle (8 clocks) requires 2.821us, and a two millisecond delay needs
-; exactly 708.75 major cycles.  The following loop uses 4 major cycles per
-; iteration, so a count of 176 gives 704 clocks.  Adding in two more for the
-; LDI and three more for the final NOP gives us a grand total of 709.  That's
-; as close as we're gonna get!
-;
-;  There's an alternative constant here calculated for a 3.579545MHz CPU 
-; crystal instead.  That gives a major cycle of 2.235us, so a two millisecond
-; delay needs 894.89 major cycles.  That gives a loop count of 223 for 892
-; cycles, and the final NOP gives 3 more for a total of 895 cycles.  That's
-; pretty close!
-	.IF	CPUCLOCK == 2835000
-DLYCONS	.EQU	176		; magic constant for 2mS at 2.835MHz
+;   This macro delays for 2 ms which is calculated from the clock frequency.
+; Since each loop of the delay takes two instructions, which is eight machine
+; cycles, we multiply this times 2000 which is the number of microseconds in
+; 2 ms giving 16000 as the divisor.  Unfortunately this doesn't work when the
+; CPUCLOCK is > 4Mhz because the delay constant would exceed 255.  In that
+; case we divide by 32000 and repeat the loop twice.  That also doubles the
+; roundoff error, but this is pretty non-critical.
+	.IF	(CPUCLOCK <= 4000000)
+DLYCONS	.EQU	CPUCLOCK/16000
+#define DLY2MS	LDI DLYCONS\ SMI 1\ BNZ $-2
+	.ELSE
+DLYCONS	.EQU	CPUCLOCK/32000
+#define DLY2MS	LDI DLYCONS\ SMI 1\ BNZ $-2\ LDI DLYCONS\ SMI 1\ BNZ $-2
 	.ENDIF
-	.IF	CPUCLOCK == 3579545
-DLYCONS	.EQU	223		; magic constant for 2ms at 3.579545MHz
-	.ENDIF
-#define DLY2MS	LDI DLYCONS\ SMI 1\ BNZ $-2\ NOP
 
 ; Enable and disable interrupts (P = PC) ...
 #define ION	SEX PC\ RET\ .BYTE (SP<<4) | PC
@@ -873,7 +880,7 @@ XHDR4:	.BLOCK	1		; received checksum
 	.ECHO	"**** TOO MANY RAM BYTES - ADJUST DPBASE *****\n"
 	.ENDIF
 
-	.SBTTL	Startup, Copyright and Vectors
+	.SBTTL	Startup and BASIC Vectors
 
 ;++
 ;   This code gets control immediately after a hardware reset, and contains
@@ -923,24 +930,47 @@ XHDR4:	.BLOCK	1		; received checksum
 	LBR	BTIME		; 23 - return current UPTIME
 	.ENDIF
 
+	.SBTTL	Copyright and System Information
+
+;   This macro will convert a 3 digit decimal number, 0..999, into three
+; ASCII characters with leading zeros.  It's crude, but it works!
+#define TODEC(x)	.BYTE '0'+((x)%10)
+#define	TODEC3(x)	.BYTE '0'+((x/100)%10), '0'+((x/10)%10), '0'+(x%10)
+
 ;++
-;   And lastly the firmware version, name, copyright notice and date all live
-; at the end of the vector table.  These strings should appear at or near to
-; the beginning of the EPROM, because we don't want them to be hard to find,
-; after all!
+;   The firmware version, name, copyright notice and date all live here.  These
+; strings should appear at or near to the beginning of the EPROM, because we
+; don't want them to be hard to find, after all!
 ;--
-SYSNAM:	.TEXT	"SPARE TIME GIZMOS VIS1802 V"
-	.BYTE	'0'+VERMAJ, '('
+SYSNAM:	.TEXT	"SPARE TIME GIZMOS VIS1802  V"
 	.BYTE	'0'+(VEREDT/100)
 	.BYTE	'0'+((VEREDT/10)%10)
 	.BYTE	'0'+(VEREDT%10)
-	.BYTE	')', 0
+	.BYTE	0
 	.INCLUDE "sysdat.asm"
 RIGHTS1:.TEXT	"Copyright (C) 2024 Spare Time Gizmos\000"
 RIGHTS2:.TEXT	"All rights reserved\000"
 	.IF (BASIC != 0)
 BRIGHTS:.TEXT	"RCA BASIC3 V1.1 BY Ron Cenker\000"
 	.ENDIF
+
+;   We've accumulated a couple of assembly options - different CPU clocks and
+; font sizes.  It causes a lot of problems when we run the software with one
+; set of options on hardware that's built a different way.  Let's embed all
+; the configuration options in here so we can at least tell how this EPROM
+; image was assembled.
+SYSOPT:	.TEXT	"CPU "
+	.BYTE	'0'+(CPUCLOCK/1000000)
+	.TEXT	"."
+	TODEC3((CPUCLOCK/1000) % 1000)
+	.TEXT	"MHz  "
+	.IF (FONTSIZE == 64)
+	.TEXT	" 64 CHARACTER FONT"
+	.ENDIF
+	.IF (FONTSIZE == 128)
+	.TEXT	"128 character font"
+	.ENDIF
+	.BYTE	0
 
 	.SBTTL	Hardware Initializtion
 
@@ -1003,7 +1033,7 @@ SYSIN2:	SEX SP\ INP DIPSW	; read the switches again
 ; Print the system name, firmware and BIOS versions, and checksum...
 SYSIN3:	CALL(TCRLF)		; ...
 	OUTSTR(SYSNAM)		; "VIS1802 FIRMWARE"
-	CALL(TCRLF)\ CALL(TCRLF); ...
+	CALL(TCRLF)		; ...
 	OUTSTR(SYSDAT)		; print the build date
 	INLMES(" CHECKSUM ")	; and the EPROM checksum
 	RLDI(P1,CHKSUM)		; stored here by the romcksum program
@@ -1017,6 +1047,8 @@ SYSIN3:	CALL(TCRLF)		; ...
 	CALL(TCRLF)		; ...
 	.ENDIF
 	OUTSTR(RIGHTS2)		; ...
+	CALL(TCRLF)		; ...
+	OUTSTR(SYSOPT)		; print the assembly options used here
 	CALL(TCRLF)\ CALL(TCRLF); ...
 
 ; If BASIC isn't installed, then just fall into the command scanner!
@@ -1373,19 +1405,19 @@ INPUT:	CALL(HEXNW)		; read the port number
 ; Like INPUT, this command always accesses ports in I/O group 1.  If you want
 ; to access the VIS chip set, then use the VIS command instead.
 ;--
-OUTPUT:    CALL(HEXNW2)          ; P3 == port, P4 == data byte
-     CALL(CHKEOL)          ; there should be no more
-     RLDI(P2,IOT)          ; point P2 at the IOT buffer
-     GLO P3\ ANI 7         ; get the port address
-     LBZ  CMDERR          ; error if port 0 selected
-     ORI $60\ STR P2\ INC P2    ; turn it into an output instruction
-     GLO P4\ STR P2\ INC P2     ; store the data byte inline
-     LDI $D0+PC\ STR P2    ; store a "SEP PC" instruction
-     DEC P2\ DEC P2        ; back to IOT:
-     CALL(SELIO1)          ; select I/O group 1
-     SEX  P2         ; set X=P for IOT
-     SEP  P2         ; now call the output routine
-     RETURN                ; and we're done
+OUTPUT:	CALL(HEXNW2)		; P3 == port, P4 == data byte
+	CALL(CHKEOL)		; there should be no more
+	RLDI(P2,IOT)		; point P2 at the IOT buffer
+	GLO P3\ ANI 7		; get the port address
+	LBZ  CMDERR		; error if port 0 selected
+	ORI $60\ STR P2\ INC P2	; turn it into an output instruction
+	GLO P4\ STR P2\ INC P2	; store the data byte inline
+	LDI $D0+PC\ STR P2	; store a "SEP PC" instruction
+	DEC P2\ DEC P2		; back to IOT:
+	CALL(SELIO1)		; select I/O group 1
+	SEX	P2		; set X=P for IOT
+	SEP	P2		; now call the output routine
+	RETURN			; and we're done
 
 	.SBTTL	XMODEM Load and Save
 
@@ -3235,7 +3267,7 @@ DSACU1:	IRX\ POPR(T2)		; restore registers
 ; but that probably isn't necessary.
 ;--
 ENACURS:PUSHR(T1)\ PUSHR(T2)	; save some registers for working
-	IOFF			; don't want to be interrupted here
+	NOP\ IOFF		; don't want to be interrupted here
 	RLDI(T1,CURSOFF)\ LDN T1; address the cursor display flag
 	LBZ	ENACU1		; skip all this if it's already on
 	LDI $00\ STR T1\ INC T1	; turn the cursor back on
@@ -3396,10 +3428,10 @@ DSPON:	CALL(SELIO0)		; display on and we're done
 ; half a second ...
 ;--
 BELL:	CALL(SELIO0)		; all VIS registers are in group 0
-	RLDI(T1,VT.BELL)	; program the CDP1869 tone generator
-	SEX T1\ OUT VISTONE	;  ... to make a 440Hz sound
 	RLDI(T1,TTIMER)		; this variable controls the duration
 	LDI BELLTIME\ STR T1	; program the turn off time
+	RLDI(T1,BELLTONE)	; program the CDP1869 tone generator
+	SEX T1\ OUT VISTONE	;  ... to make a 440Hz sound
 	RETURN			; and we're done
 
 	.SBTTL	Display Startup Splash Screen
@@ -3457,7 +3489,7 @@ SPLAS4:	GLO T2\ STR T1		; display another ASCII character
 
 ; Display the copyright texts ...
 	CALL(TOUT)		; send all output to the VIS display
-	INLMES("\033Y\"#\000")	; position the cursor at the upper left
+	INLMES("\033Y\"$\000")	; position the cursor at the upper left
 	OUTSTR(SYSNAM)		; display the system name
 	INLMES("\033Y#$\000")	; next line down
 	OUTSTR(SYSDAT)		; display the build date
@@ -3470,9 +3502,11 @@ SPLAS4:	GLO T2\ STR T1		; display another ASCII character
 	INLMES("\033Y%*\000")	; ...
 	OUTSTR(RIGHTS2)		; ...
 	.IF (BASIC != 0)
-	INLMES("\033Y'%\000")	; and one last line
+	INLMES("\033Y'%\000")	; and one more
 	OUTSTR(BRIGHTS)		;  ... to display the BASIC3 notice
 	.ENDIF
+	INLMES("\033Y+$\000")	; last one
+	OUTSTR(SYSOPT)		;  ... to display the build options
 
 ; Wait for input from either the keyboard or the serial port ...
 SPLAS8:	RLDI(T1,RXGETP)\ LDA T1	; get the receiver circular buffer pointer
@@ -3483,9 +3517,9 @@ SPLAS8:	RLDI(T1,RXGETP)\ LDA T1	; get the receiver circular buffer pointer
 	LBZ	SPLAS8		; yes - keep waiting
 
 ; All done ...
-SPLAS9:	CALL(RSTIO)		; reset the console input
-	CALL(ENACURS)		; and turn the cursor back on
+SPLAS9:	CALL(ENACURS)		; and turn the cursor back on
 	CALL(ERASE)		; erase the screen
+	CALL(RSTIO)		; reset the console input
 	RETURN			; all done
 
 	.SBTTL	Initialize VIS Display
@@ -3623,14 +3657,15 @@ PLAY:	CALL(LTRIM)\ CALL(ISEOL); skip leading spaces
 
 ; Play a musical demo ...
 PDEMO:	CALL(CHKEOL)		; no arguments here
-	RLDI(P1,ODE)		; point to the sample tune
+	RLDI(P1,POPCORN)	; point to the sample tune
 				; and fall into PLAY1
 
 ; This routine actually plays the string pointed to by P1 ...
 PLAY1:	RLDI(T1,OCTVOL)		; initialize OCTVOL, TEMPO and NOTIME
-	LDI $3F\ STR T1\ INC T1	; octave of middle C, volume maximum
-	LDI	HERTZ/2		; a quarter note lasts one half second
-	STR T1\ INC T1\ STR T1	; for a 120 BPM tempo
+	LDI OCTAVE+VT.DVOL	; octave of middle C, volume maximum
+	STR T1\ INC T1		; ...
+	LDI	NOTETIME	; default quarter note time
+	STR T1\ INC T1\ STR T1	;  ... for a 120 BPM tempo
 
 ; Play the string pointed to by P1 ...
 PLAY2:	CALL(LTRIM)		; ignore any spaces
@@ -3736,48 +3771,43 @@ PNOTE9:	SDF\ RETURN		; return DF=1 and leave P1 unchanged
 ; first and then adding or subtracting one table entry.
 ;
 ;   Note that the tone generator in the CDP1869 is clocked by TPB from the
-; 1802, and these divisors assume that the CPU clock is generated by the
-; 5.67Mhz/2 output from the CDP1869.  If you elect to use a different CPU
-; clock frequency, then you'll need to adjust these values!
-;
-;   Here are two tables of note  divisors - one for a 2.835MHz CPU clock, which
-; is what you get if you don't install a crystal and use the VIS clock/2 as the
-; CPU clock.  There's another table here for a 3.579545Mhz CPU crystal.
+; 1802, so these divisors depend on the CPU clock frequency.  Worse, the 1869
+; limits the divisors to only 7 bits (NOT 8!), which means that we have to
+; pick the octave divisor carefully so that all notes are in this range.
 ;--
-
-; Note frequencies for a 2.835MHz CPU clock ...
-	.IF	CPUCLOCK == 2835000
-NOTES:	.DB	'C',     $54	; 0 middle C (with octave == 3)
-	.DB	'C'+80H, $4F	; 1 C#/D-
-	.DB	'D',     $4B	; 2 D
-	.DB	'D'+80H, $47	; 3 D#/E-
-	.DB	'E',     $43	; 4 E
-	.DB	'F',	 $3F	; 5 F
-	.DB	'F'+80H, $3B	; 6 F#/G-
-	.DB	'G',	 $38	; 7 G
-	.DB	'A'+80H, $35	; 8 G#/A-
-	.DB	'A',     $32	; 9 A
-	.DB	'B'+80H, $2F	;10 A#/B-
-NOTEND:	.DB	'B',	 $2C	;11 B
-	.DB	0
+	.IF	(CPUCLOCK <= 4000000)
+;   For CPU clocks .LE. 4MHz, we can pick octave 3.  That gives a CDP1869
+; prescale divisor of /64, plus another /2 on the output of the 1869 to
+; generate a symmetrical square wave.
+OCTAVE	.EQU	$30
+#define NOTE(f)	(CPUCLOCK/f/64+1)/2
+	.ELSE
+;   For CPU clocks .GT. 4Mhz, we need to pick octave 2 to prevent some of the
+; note divisors from exceeding $7F.  Octave 2 gives a prescale divisor of /128
+; (plus the same /2 at the CDP1869 output).
+OCTAVE	.EQU	$20
+#define NOTE(f)	(CPUCLOCK/f/128+1)/2
 	.ENDIF
 
-; Note frequencies for a 3.579545MHz CPU clock ...
-	.IF	CPUCLOCK == 3579545
-NOTES:	.DB	'C',     $6A	; 0 middle C (with octave == 3)
-	.DB	'C'+80H, $64	; 1 C#/D-
-	.DB	'D',     $5F	; 2 D
-	.DB	'D'+80H, $59	; 3 D#/E-
-	.DB	'E',     $54	; 4 E
-	.DB	'F',	 $50	; 5 F
-	.DB	'F'+80H, $4B	; 6 F#/G-
-	.DB	'G',	 $47	; 7 G
-	.DB	'A'+80H, $43	; 8 G#/A-
-	.DB	'A',     $3F	; 9 A
-	.DB	'B'+80H, $3B	;10 A#/B-
-NOTEND:	.DB	'B',	 $38	;11 B
+; Table of one octave of notes, from middle C to B above middle C ...
+NOTES:	.DB	'C',     NOTE(262)	; 0 middle C
+	.DB	'C'+80H, NOTE(277)	; 1 C#/D-
+	.DB	'D',     NOTE(294)	; 2 D
+	.DB	'D'+80H, NOTE(311)	; 3 D#/E-
+	.DB	'E',     NOTE(330)	; 4 E
+	.DB	'F',	 NOTE(349)	; 5 F
+	.DB	'F'+80H, NOTE(370)	; 6 F#/G-
+	.DB	'G',	 NOTE(392)	; 7 G
+	.DB	'A'+80H, NOTE(415)	; 8 G#/A-
+	.DB	'A',     NOTE(440)	; 9 A
+	.DB	'B'+80H, NOTE(466)	;10 A#/B-
+NOTEND:	.DB	'B',	 NOTE(494)	;11 B
 	.DB	0
-	.ENDIF
+
+;   This constant is used to program the CDP1869 for the Control-G bell tone.
+; It can be pretty much anything you want, but right now we use 440Hz (A above
+; middle C) ...
+BELLTONE .EQU	(NOTE(440) << 8) + OCTAVE + VT.DVOL
 
 	.SBTTL	Shift Octaves and Change Note Duration
 
@@ -3800,19 +3830,19 @@ PSPCL:	RLDI(T1,OCTVOL)		; point T1 to OCTVOL for later
 	DEC P1\ SDF\ RETURN	; none of those - restore P1 and return DF=1
 
 
-;  Shift the current notes up one octave, unless we're already at octave 5,
-; in which case do nothing ...
+;  Shift the current notes up one octave, unless we already have, in which case
+; do nothing ...
 OCTUP:	LDN T1\ ADI $10\ PHI AUX; bump it up one octave
-	SMI $60\ LBGE OCTUP1	; but stop after octave 5
-	GHI AUX\ STR T1		; update it
+	SMI	OCTAVE+$20	; but stop after octave 5
+	LSGE\ GHI AUX\ STR T1	; update it
 OCTUP1:	CDF\ RETURN		; return DF=0 and we're done
 
 
-;  Shift the current notes down one octave, unless we're already at octave 2,
-; in which case do nothing ...
+;  Shift the current notes down one octave, unless we already have, in which
+; case do nothing ...
 OCTDN:	LDN T1\ SMI $10\ PHI AUX; drop down one octave
-	SMI $20\ LBL OCTDN1	; but stop at octave 2
-	GHI AUX\ STR T1		; update it
+	SMI OCTAVE-$10		; but stop at octave 2
+	LSL\ GHI AUX\ STR T1	; update it
 OCTDN1:	CDF\ RETURN		; and return DF=0
 
 
@@ -4507,13 +4537,13 @@ XTABLE:	.DB	 0,$20,  0,$08,  0,$02	;   0<=X<  6
 ;++
 ; Scan two hexadecimal parameters and return them in registers P4 and P3...
 ;--
-HEXNW2:    CALL(HEXNW)        ; scan the first parameter
-    RCOPY(P3,P2)        ; return first parameter in P3
-    CALL(ISEOL)        ; there had better be more there
-    LBDF    CMDERR        ; error if not
-    CALL(HEXNW)        ; scan the second parameter
-    RCOPY(P4,P2)        ; return second parameter in P4
-    RETURN            ; and we're done
+HEXNW2:	CALL(HEXNW)		; scan the first parameter
+	RCOPY(P3,P2)		; return first parameter in P3
+	CALL(ISEOL)		; there had better be more there
+	LBDF	CMDERR		; error if not
+	CALL(HEXNW)		; scan the second parameter
+	RCOPY(P4,P2)		; return second parameter in P4
+	RETURN			; and we're done
 
 ;++
 ;   Scan a single hexadecimal parameter and return its value in register P2.
